@@ -46,7 +46,7 @@ func SummarizeGeminiModels(models []config.GeminiModel) GeminiModelsSummary {
 			if model.IsCompat {
 				isCompat = "true"
 			}
-			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|is-compat=" + isCompat + thinkingHashSuffix(model.Thinking))
+			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|is-compat=" + isCompat)
 		}
 	})
 	return GeminiModelsSummary{
@@ -71,7 +71,7 @@ func SummarizeClaudeModels(models []config.ClaudeModel) ClaudeModelsSummary {
 			if model.IsCompat {
 				isCompat = "true"
 			}
-			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|is-compat=" + isCompat + thinkingHashSuffix(model.Thinking))
+			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|is-compat=" + isCompat)
 		}
 	})
 	return ClaudeModelsSummary{
@@ -100,7 +100,7 @@ func SummarizeCodexModels(models []config.CodexModel) CodexModelsSummary {
 			if model.IsCompat {
 				isCompat = "true"
 			}
-			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|force-mapping=" + forceMapping + "|is-compat=" + isCompat + thinkingHashSuffix(model.Thinking))
+			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|force-mapping=" + forceMapping + "|is-compat=" + isCompat)
 		}
 	})
 	return CodexModelsSummary{
@@ -128,7 +128,7 @@ func SummarizeVertexModels(models []config.VertexCompatModel) VertexModelsSummar
 		if model.OpenAPI != nil {
 			key += fmt.Sprintf("|openapi=%t", *model.OpenAPI)
 		}
-		names = append(names, key+thinkingHashSuffix(model.Thinking))
+		names = append(names, key)
 	}
 	if len(names) == 0 {
 		return VertexModelsSummary{}

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	sdkpluginstore "github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginstore"
 	"gopkg.in/yaml.v3"
 )
@@ -695,9 +694,6 @@ type ClaudeModel struct {
 	// and enables provider-aware signed-thinking replay for Claude-compatible API-key models.
 	// Default false keeps the normal signature validation behavior.
 	IsCompat bool `yaml:"is-compat,omitempty" json:"is-compat,omitempty"`
-
-	// Thinking configures the thinking/reasoning capability for this model.
-	Thinking *registry.ThinkingSupport `yaml:"thinking,omitempty" json:"thinking,omitempty"`
 }
 
 func (m ClaudeModel) GetName() string { return m.Name }
@@ -708,8 +704,6 @@ func (m ClaudeModel) GetDisplayName() string   { return m.DisplayName }
 func (m ClaudeModel) GetMaxContextLength() int { return m.MaxContextLength }
 func (m ClaudeModel) GetForceMapping() bool    { return m.ForceMapping }
 func (m ClaudeModel) GetIsCompat() bool        { return m.IsCompat }
-
-func (m ClaudeModel) GetThinking() *registry.ThinkingSupport { return m.Thinking }
 
 // CodexKey represents the configuration for a Codex API key,
 // including the API key itself and an optional base URL for the API endpoint.
@@ -801,9 +795,6 @@ type CodexModel struct {
 	// SupportConfigurationUpdate enables configuration_update for this API-key model.
 	// It defaults to false, independently of the built-in OAuth model catalog.
 	SupportConfigurationUpdate bool `yaml:"support-configuration-update,omitempty" json:"support-configuration-update,omitempty"`
-
-	// Thinking configures the thinking/reasoning capability for this model.
-	Thinking *registry.ThinkingSupport `yaml:"thinking,omitempty" json:"thinking,omitempty"`
 }
 
 func (m CodexModel) GetName() string { return m.Name }
@@ -814,8 +805,6 @@ func (m CodexModel) GetDisplayName() string   { return m.DisplayName }
 func (m CodexModel) GetMaxContextLength() int { return m.MaxContextLength }
 func (m CodexModel) GetForceMapping() bool    { return m.ForceMapping }
 func (m CodexModel) GetIsCompat() bool        { return m.IsCompat }
-
-func (m CodexModel) GetThinking() *registry.ThinkingSupport { return m.Thinking }
 
 // XAIKey uses the Codex API key structure for native xAI execution.
 type XAIKey = CodexKey
@@ -901,9 +890,6 @@ type GeminiModel struct {
 	// IsCompat preserves thinking blocks with empty signatures for compatible upstreams.
 	// Default false keeps the normal signature validation behavior.
 	IsCompat bool `yaml:"is-compat,omitempty" json:"is-compat,omitempty"`
-
-	// Thinking configures the thinking/reasoning capability for this model.
-	Thinking *registry.ThinkingSupport `yaml:"thinking,omitempty" json:"thinking,omitempty"`
 }
 
 func (m GeminiModel) GetName() string { return m.Name }
@@ -914,8 +900,6 @@ func (m GeminiModel) GetDisplayName() string   { return m.DisplayName }
 func (m GeminiModel) GetMaxContextLength() int { return m.MaxContextLength }
 func (m GeminiModel) GetForceMapping() bool    { return m.ForceMapping }
 func (m GeminiModel) GetIsCompat() bool        { return m.IsCompat }
-
-func (m GeminiModel) GetThinking() *registry.ThinkingSupport { return m.Thinking }
 
 // OpenAICompatibility represents the configuration for OpenAI API compatibility
 // with external providers, allowing model aliases to be routed through OpenAI API format.
@@ -1008,10 +992,6 @@ type OpenAICompatibilityModel struct {
 	// UseMaxCompletionTokens emits max_completion_tokens instead of legacy max_tokens for this model.
 	// Default false preserves max_tokens for older compatible upstreams.
 	UseMaxCompletionTokens bool `yaml:"use-max-completion-tokens,omitempty" json:"use-max-completion-tokens,omitempty"`
-
-	// Thinking configures the thinking/reasoning capability for this model.
-	// If nil, the model defaults to level-based reasoning with levels ["low", "medium", "high"].
-	Thinking *registry.ThinkingSupport `yaml:"thinking,omitempty" json:"thinking,omitempty"`
 }
 
 func (m OpenAICompatibilityModel) GetName() string { return m.Name }
@@ -1023,5 +1003,3 @@ func (m OpenAICompatibilityModel) GetMaxContextLength() int        { return m.Ma
 func (m OpenAICompatibilityModel) GetForceMapping() bool           { return m.ForceMapping }
 func (m OpenAICompatibilityModel) GetIsCompat() bool               { return m.IsCompat }
 func (m OpenAICompatibilityModel) GetUseMaxCompletionTokens() bool { return m.UseMaxCompletionTokens }
-
-func (m OpenAICompatibilityModel) GetThinking() *registry.ThinkingSupport { return m.Thinking }

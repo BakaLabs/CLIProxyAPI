@@ -71,7 +71,7 @@ func init() {
 //	}
 func (a *Applier) Apply(body []byte, config thinking.ThinkingConfig, modelInfo *registry.ModelInfo) ([]byte, error) {
 	if thinking.IsUserDefinedModel(modelInfo) {
-		return applyCompatibleClaude(body, config)
+		return applyCompatibleClaude(body, config, modelInfo)
 	}
 	if modelInfo.Thinking == nil {
 		return body, nil
@@ -225,7 +225,7 @@ func (a *Applier) effectiveMaxTokens(body []byte, modelInfo *registry.ModelInfo)
 	return 0, false
 }
 
-func applyCompatibleClaude(body []byte, config thinking.ThinkingConfig) ([]byte, error) {
+func applyCompatibleClaude(body []byte, config thinking.ThinkingConfig, modelInfo *registry.ModelInfo) ([]byte, error) {
 	if config.Mode != thinking.ModeBudget && config.Mode != thinking.ModeNone && config.Mode != thinking.ModeAuto && config.Mode != thinking.ModeLevel {
 		return body, nil
 	}
@@ -236,7 +236,7 @@ func applyCompatibleClaude(body []byte, config thinking.ThinkingConfig) ([]byte,
 
 	switch config.Mode {
 	case thinking.ModeNone:
-		return disableThinking(body, nil), nil
+		return disableThinking(body, modelInfo), nil
 	case thinking.ModeAuto:
 		result, _ := sjson.SetBytes(body, "thinking.type", "enabled")
 		result, _ = sjson.DeleteBytes(result, "thinking.budget_tokens")
@@ -257,7 +257,7 @@ func applyCompatibleClaude(body []byte, config thinking.ThinkingConfig) ([]byte,
 		return result, nil
 	default:
 		if config.Budget == 0 {
-			return disableThinking(body, nil), nil
+			return disableThinking(body, modelInfo), nil
 		}
 		result, _ := sjson.SetBytes(body, "thinking.type", "enabled")
 		result, _ = sjson.SetBytes(result, "thinking.budget_tokens", config.Budget)

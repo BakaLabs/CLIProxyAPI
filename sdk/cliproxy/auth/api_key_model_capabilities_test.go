@@ -17,56 +17,52 @@ func TestAttachResolvedAPIKeyModelInfoUsesSelectedCredential(t *testing.T) {
 	manager := NewManager(nil, nil, nil)
 	manager.SetConfig(&internalconfig.Config{ClaudeKey: []internalconfig.ClaudeKey{
 		{
-			APIKey: "key-high",
+			APIKey: "key-a",
 			Prefix: "tenant",
 			Models: []internalconfig.ClaudeModel{{
-				Name: "shared-upstream", Alias: "public-model",
-				Thinking: &registry.ThinkingSupport{Levels: []string{"high"}},
+				Name: "upstream-a", Alias: "public-model",
 			}},
 		},
 		{
-			APIKey: "key-max",
+			APIKey: "key-b",
 			Prefix: "tenant",
 			Models: []internalconfig.ClaudeModel{{
-				Name: "shared-upstream", Alias: "public-model",
-				Thinking: &registry.ThinkingSupport{Levels: []string{"max"}},
+				Name: "upstream-b", Alias: "public-model",
 			}},
 		},
 	}})
 
-	authHigh := configuredCapabilityTestAuth("auth-high", "key-high")
-	authMax := configuredCapabilityTestAuth("auth-max", "key-max")
-	registerCapabilityTestAuth(t, manager, authHigh)
-	registerCapabilityTestAuth(t, manager, authMax)
+	authA := configuredCapabilityTestAuth("auth-a", "key-a")
+	authB := configuredCapabilityTestAuth("auth-b", "key-b")
+	registerCapabilityTestAuth(t, manager, authA)
+	registerCapabilityTestAuth(t, manager, authB)
 
-	assertResolvedThinkingLevels(t, manager.attachResolvedAPIKeyModelInfo(cliproxyexecutor.Request{}, authHigh, "tenant/public-model", "shared-upstream"), "high")
-	assertResolvedThinkingLevels(t, manager.attachResolvedAPIKeyModelInfo(cliproxyexecutor.Request{}, authMax, "tenant/public-model", "shared-upstream"), "max")
+	assertResolvedUpstreamModel(t, manager.attachResolvedAPIKeyModelInfo(cliproxyexecutor.Request{}, authA, "tenant/public-model", "upstream-a"), "upstream-a")
+	assertResolvedUpstreamModel(t, manager.attachResolvedAPIKeyModelInfo(cliproxyexecutor.Request{}, authB, "tenant/public-model", "upstream-b"), "upstream-b")
 }
 
 func TestAttachResolvedAPIKeyModelInfoUsesExactDuplicateCredentialConfig(t *testing.T) {
 	manager := NewManager(nil, nil, nil)
-	highModels := []internalconfig.ClaudeModel{{
-		Name: "shared-upstream", Alias: "public-model",
-		Thinking: &registry.ThinkingSupport{Levels: []string{"high"}},
+	aModels := []internalconfig.ClaudeModel{{
+		Name: "upstream-a", Alias: "public-model",
 	}}
-	maxModels := []internalconfig.ClaudeModel{{
-		Name: "shared-upstream", Alias: "public-model",
-		Thinking: &registry.ThinkingSupport{Levels: []string{"max"}},
+	bModels := []internalconfig.ClaudeModel{{
+		Name: "upstream-b", Alias: "public-model",
 	}}
 	manager.SetConfig(&internalconfig.Config{ClaudeKey: []internalconfig.ClaudeKey{
-		{APIKey: "shared-key", Prefix: "tenant", Models: highModels},
-		{APIKey: "shared-key", Prefix: "tenant", Models: maxModels},
+		{APIKey: "shared-key", Prefix: "tenant", Models: aModels},
+		{APIKey: "shared-key", Prefix: "tenant", Models: bModels},
 	}})
 
-	authHigh := configuredCapabilityTestAuth("auth-duplicate-high", "shared-key")
-	authHigh.Attributes[AttributeConfigIndex] = "0"
-	authMax := configuredCapabilityTestAuth("auth-duplicate-max", "shared-key")
-	authMax.Attributes[AttributeConfigIndex] = "1"
-	registerCapabilityTestAuth(t, manager, authHigh)
-	registerCapabilityTestAuth(t, manager, authMax)
+	authA := configuredCapabilityTestAuth("auth-duplicate-a", "shared-key")
+	authA.Attributes[AttributeConfigIndex] = "0"
+	authB := configuredCapabilityTestAuth("auth-duplicate-b", "shared-key")
+	authB.Attributes[AttributeConfigIndex] = "1"
+	registerCapabilityTestAuth(t, manager, authA)
+	registerCapabilityTestAuth(t, manager, authB)
 
-	assertResolvedThinkingLevels(t, manager.attachResolvedAPIKeyModelInfo(cliproxyexecutor.Request{}, authHigh, "tenant/public-model", "shared-upstream"), "high")
-	assertResolvedThinkingLevels(t, manager.attachResolvedAPIKeyModelInfo(cliproxyexecutor.Request{}, authMax, "tenant/public-model", "shared-upstream"), "max")
+	assertResolvedUpstreamModel(t, manager.attachResolvedAPIKeyModelInfo(cliproxyexecutor.Request{}, authA, "tenant/public-model", "upstream-a"), "upstream-a")
+	assertResolvedUpstreamModel(t, manager.attachResolvedAPIKeyModelInfo(cliproxyexecutor.Request{}, authB, "tenant/public-model", "upstream-b"), "upstream-b")
 }
 
 func TestAttachResolvedAPIKeyModelInfoPrefersExactConfiguredSuffix(t *testing.T) {
@@ -76,30 +72,30 @@ func TestAttachResolvedAPIKeyModelInfoPrefersExactConfiguredSuffix(t *testing.T)
 		APIKey: "key-suffix",
 		Prefix: "tenant",
 		Models: []internalconfig.ClaudeModel{
-			{Name: "shared-upstream(high)", Alias: "public-high", Thinking: &registry.ThinkingSupport{Levels: []string{"high"}}},
-			{Name: "shared-upstream(low)", Alias: "public-low", Thinking: &registry.ThinkingSupport{Levels: []string{"low"}}},
-			{Name: "alias-upstream", Alias: "public(high)", Thinking: &registry.ThinkingSupport{Levels: []string{"high"}}},
-			{Name: "alias-upstream", Alias: "public(low)", Thinking: &registry.ThinkingSupport{Levels: []string{"low"}}},
+			{Name: "shared-upstream(high)", Alias: "public-high"},
+			{Name: "shared-upstream(low)", Alias: "public-low"},
+			{Name: "alias-upstream", Alias: "public(high)"},
+			{Name: "alias-upstream", Alias: "public(low)"},
 		},
 	}}})
 	registerCapabilityTestAuth(t, manager, auth)
 
 	req := manager.attachResolvedAPIKeyModelInfo(cliproxyexecutor.Request{}, auth, "tenant/public-low", "shared-upstream(low)")
-	assertResolvedThinkingLevels(t, req, "low")
+	assertResolvedUpstreamModel(t, req, "shared-upstream(low)")
 
 	models, _, _, routing := manager.executionModelCandidatesWithAlias(auth, "tenant/shared-upstream(low)")
 	if len(models) != 1 || models[0] != "shared-upstream(low)" {
 		t.Fatalf("direct suffixed models = %v, want [shared-upstream(low)]", models)
 	}
 	directReq := attachResolvedAPIKeyModelInfo(routing, cliproxyexecutor.Request{}, auth, "tenant/shared-upstream(low)", models[0])
-	assertResolvedThinkingLevels(t, directReq, "low")
+	assertResolvedUpstreamModel(t, directReq, "shared-upstream(low)")
 
 	aliasModels, _, _, aliasRouting := manager.executionModelCandidatesWithAlias(auth, "tenant/public(low)")
 	if len(aliasModels) != 1 || aliasModels[0] != "alias-upstream(low)" {
 		t.Fatalf("suffixed alias models = %v, want [alias-upstream(low)]", aliasModels)
 	}
 	aliasReq := attachResolvedAPIKeyModelInfo(aliasRouting, cliproxyexecutor.Request{}, auth, "tenant/public(low)", aliasModels[0])
-	assertResolvedThinkingLevels(t, aliasReq, "low")
+	assertResolvedUpstreamModel(t, aliasReq, "alias-upstream")
 }
 
 func TestAPIKeyModelRoutingClonesPublishedConfig(t *testing.T) {
@@ -109,12 +105,10 @@ func TestAPIKeyModelRoutingClonesPublishedConfig(t *testing.T) {
 		Prefix: "tenant",
 		Models: []internalconfig.ClaudeModel{{
 			Name: "shared-upstream", Alias: "public",
-			Thinking: &registry.ThinkingSupport{Levels: []string{"high"}},
 		}},
 	}}}
 	manager.SetConfig(cfg)
 	cfg.ClaudeKey[0].Models[0].Alias = "mutated"
-	cfg.ClaudeKey[0].Models[0].Thinking.Levels[0] = "max"
 
 	auth := configuredCapabilityTestAuth("auth-clone", "key-clone")
 	registerCapabilityTestAuth(t, manager, auth)
@@ -123,34 +117,37 @@ func TestAPIKeyModelRoutingClonesPublishedConfig(t *testing.T) {
 		t.Fatalf("cloned execution models = %v, want [shared-upstream]", models)
 	}
 	req := attachResolvedAPIKeyModelInfo(routing, cliproxyexecutor.Request{}, auth, "tenant/public", models[0])
-	assertResolvedThinkingLevels(t, req, "high")
+	assertResolvedUpstreamModel(t, req, "shared-upstream")
 }
 
 func TestAPIKeyModelRoutingKeepsOneExecutionSnapshotAcrossReload(t *testing.T) {
 	manager := NewManager(nil, nil, nil)
 	auth := configuredCapabilityTestAuth("auth-reload", "key-reload")
-	buildConfig := func(level string) *internalconfig.Config {
+	buildConfig := func(upstream string) *internalconfig.Config {
 		return &internalconfig.Config{ClaudeKey: []internalconfig.ClaudeKey{{
 			APIKey: "key-reload",
 			Prefix: "tenant",
 			Models: []internalconfig.ClaudeModel{{
-				Name: "shared-upstream", Alias: "public",
-				Thinking: &registry.ThinkingSupport{Levels: []string{level}},
+				Name: upstream, Alias: "public",
 			}},
 		}}}
 	}
-	manager.SetConfig(buildConfig("high"))
+	manager.SetConfig(buildConfig("shared-upstream-old"))
 	registerCapabilityTestAuth(t, manager, auth)
 	models, _, _, oldRouting := manager.executionModelCandidatesWithAlias(auth, "tenant/public")
-	if len(models) != 1 || models[0] != "shared-upstream" {
-		t.Fatalf("execution models = %v, want [shared-upstream]", models)
+	if len(models) != 1 || models[0] != "shared-upstream-old" {
+		t.Fatalf("execution models = %v, want [shared-upstream-old]", models)
 	}
 
-	manager.SetConfig(buildConfig("max"))
+	manager.SetConfig(buildConfig("shared-upstream-new"))
 	oldReq := attachResolvedAPIKeyModelInfo(oldRouting, cliproxyexecutor.Request{}, auth, "tenant/public", models[0])
-	assertResolvedThinkingLevels(t, oldReq, "high")
-	newReq := manager.attachResolvedAPIKeyModelInfo(cliproxyexecutor.Request{}, auth, "tenant/public", models[0])
-	assertResolvedThinkingLevels(t, newReq, "max")
+	assertResolvedUpstreamModel(t, oldReq, "shared-upstream-old")
+	newModels, _, _, newRouting := manager.executionModelCandidatesWithAlias(auth, "tenant/public")
+	if len(newModels) != 1 || newModels[0] != "shared-upstream-new" {
+		t.Fatalf("reloaded execution models = %v, want [shared-upstream-new]", newModels)
+	}
+	newReq := attachResolvedAPIKeyModelInfo(newRouting, cliproxyexecutor.Request{}, auth, "tenant/public", newModels[0])
+	assertResolvedUpstreamModel(t, newReq, "shared-upstream-new")
 }
 
 func TestAttachResolvedAPIKeyModelInfoSupportsKeylessOpenAICompatibility(t *testing.T) {
@@ -162,11 +159,9 @@ func TestAttachResolvedAPIKeyModelInfoSupportsKeylessOpenAICompatibility(t *test
 		Models: []internalconfig.OpenAICompatibilityModel{
 			{
 				Name: "shared-upstream", Alias: "public-model", ForceMapping: true, IsCompat: true,
-				Thinking: &registry.ThinkingSupport{Levels: []string{"high"}},
 			},
 			{
 				Name: "fallback-upstream", Alias: "public-model",
-				Thinking: &registry.ThinkingSupport{Levels: []string{"high"}},
 			},
 		},
 	}}})
@@ -193,7 +188,7 @@ func TestAttachResolvedAPIKeyModelInfoSupportsKeylessOpenAICompatibility(t *test
 		t.Fatalf("fallback alias result = %+v, want force mapping disabled", fallbackAliasResult)
 	}
 	req := attachResolvedAPIKeyModelInfo(routing, cliproxyexecutor.Request{}, auth, "tenant/public-model", models[0])
-	assertResolvedThinkingLevels(t, req, "high")
+	assertResolvedUpstreamModel(t, req, "shared-upstream")
 	info, ok := ResolvedAPIKeyModelInfo(req)
 	if !ok || info == nil || !info.IsCompat {
 		t.Fatal("OpenAI compatibility model IsCompat = false, want true")
@@ -212,12 +207,41 @@ func TestAttachResolvedAPIKeyModelInfoBindsUnknownConfiguredCapability(t *testin
 
 	req := manager.attachResolvedAPIKeyModelInfo(cliproxyexecutor.Request{}, auth, "tenant/unknown-public", "unknown-upstream")
 	info, ok := ResolvedAPIKeyModelInfo(req)
-	if !ok || info == nil || info.UserDefined || info.Thinking != nil {
-		t.Fatalf("ResolvedAPIKeyModelInfo() = (%+v, %t), want authoritative empty capability", info, ok)
+	// Configured models pass thinking through without validation.
+	if !ok || info == nil || !info.UserDefined || info.Thinking != nil {
+		t.Fatalf("ResolvedAPIKeyModelInfo() = (%+v, %t), want authoritative user-defined capability", info, ok)
 	}
 	fallbackReq := manager.attachResolvedAPIKeyModelInfo(cliproxyexecutor.Request{}, auth, "tenant/not-configured", "not-configured")
 	if fallbackInfo, fallbackOK := ResolvedAPIKeyModelInfo(fallbackReq); fallbackOK || fallbackInfo != nil {
 		t.Fatalf("unconfigured model info = (%+v, %t), want registry fallback", fallbackInfo, fallbackOK)
+	}
+}
+
+// Configured models keep the catalog way of turning thinking off (e.g.
+// between_tools on claude-sonnet-5-5) while their thinking levels pass through
+// without validation.
+func TestAttachResolvedAPIKeyModelInfoKeepsCatalogDisableType(t *testing.T) {
+	manager := NewManager(nil, nil, nil)
+	manager.SetConfig(&internalconfig.Config{ClaudeKey: []internalconfig.ClaudeKey{{
+		APIKey: "key-disable-type", Prefix: "tenant",
+		Models: []internalconfig.ClaudeModel{{Name: "claude-sonnet-5-5", Alias: "public"}},
+	}}})
+	auth := configuredCapabilityTestAuth("auth-disable-type", "key-disable-type")
+	registerCapabilityTestAuth(t, manager, auth)
+
+	req := manager.attachResolvedAPIKeyModelInfo(cliproxyexecutor.Request{}, auth, "tenant/public", "claude-sonnet-5-5")
+	info, ok := ResolvedAPIKeyModelInfo(req)
+	if !ok || info == nil {
+		t.Fatalf("ResolvedAPIKeyModelInfo() = (%+v, %t), want bound capability", info, ok)
+	}
+	if !info.UserDefined {
+		t.Fatal("configured model capability must be user-defined for thinking passthrough")
+	}
+	if info.Thinking == nil || info.Thinking.DisableType != "between_tools" {
+		t.Fatalf("Thinking = %+v, want catalog between_tools disable type", info.Thinking)
+	}
+	if len(info.Thinking.Levels) != 0 || info.Thinking.Min != 0 || info.Thinking.Max != 0 {
+		t.Fatalf("Thinking = %+v, want no level or budget declaration", info.Thinking)
 	}
 }
 
@@ -659,19 +683,11 @@ func configuredCapabilityTestAuth(id, apiKey string) *Auth {
 	}
 }
 
-func assertResolvedThinkingLevels(t *testing.T, req cliproxyexecutor.Request, want ...string) {
+func assertResolvedUpstreamModel(t *testing.T, req cliproxyexecutor.Request, want string) {
 	t.Helper()
 	info, ok := ResolvedAPIKeyModelInfo(req)
-	if !ok || info == nil || info.Thinking == nil {
-		t.Fatalf("ResolvedAPIKeyModelInfo() = (%+v, %t), want thinking levels %v", info, ok, want)
-	}
-	if len(info.Thinking.Levels) != len(want) {
-		t.Fatalf("thinking levels = %v, want %v", info.Thinking.Levels, want)
-	}
-	for i := range want {
-		if info.Thinking.Levels[i] != want[i] {
-			t.Fatalf("thinking levels = %v, want %v", info.Thinking.Levels, want)
-		}
+	if !ok || info == nil || info.ID != want {
+		t.Fatalf("ResolvedAPIKeyModelInfo() = (%+v, %t), want upstream model %q", info, ok, want)
 	}
 }
 

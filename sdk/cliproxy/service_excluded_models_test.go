@@ -185,8 +185,8 @@ func TestRegisterModelsForAuth_OpenAICompatibilityImageModelType(t *testing.T) {
 	if chatModel.Type != "openai-compatibility" {
 		t.Fatalf("chat model type = %q, want openai-compatibility", chatModel.Type)
 	}
-	if chatModel.Thinking == nil {
-		t.Fatal("expected chat model to keep default thinking support")
+	if chatModel.Thinking != nil || !chatModel.UserDefined {
+		t.Fatalf("chat model thinking = %+v user-defined = %t, want nil thinking with passthrough", chatModel.Thinking, chatModel.UserDefined)
 	}
 }
 

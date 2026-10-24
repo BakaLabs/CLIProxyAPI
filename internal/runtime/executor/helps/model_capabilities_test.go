@@ -108,7 +108,6 @@ func TestApplyRequestThinkingConfigurationUpdateSelectedCodexModel(t *testing.T)
 					APIKey: "selected-update-key", Prefix: "tenant",
 					Models: []internalconfig.CodexModel{{
 						Name: "opaque-route", Alias: "public", SupportConfigurationUpdate: tc.supported,
-						Thinking: &registry.ThinkingSupport{Levels: []string{"low", "medium", "high", "xhigh"}},
 					}},
 				}},
 			})
@@ -197,7 +196,10 @@ func TestApplyRequestThinkingConfigurationUpdateCrossProtocol(t *testing.T) {
 	}
 }
 
-func TestApplyRequestThinkingUsesExactClaudeModeForSummaryOnlyRequest(t *testing.T) {
+// A summary-only request to a configured Claude model passes the translator's
+// inferred adaptive activation through: configured models no longer carry a
+// thinking capability declaration, so the upstream validates the mode.
+func TestApplyRequestThinkingPassesSummaryOnlyRequestThroughForConfiguredModel(t *testing.T) {
 	manager := cliproxyauth.NewManager(nil, nil, nil)
 	manager.SetConfig(&internalconfig.Config{
 		SDKConfig: internalconfig.SDKConfig{ForceModelPrefix: true},
@@ -207,10 +209,6 @@ func TestApplyRequestThinkingUsesExactClaudeModeForSummaryOnlyRequest(t *testing
 			Models: []internalconfig.ClaudeModel{{
 				Name:  "summary-shared-upstream",
 				Alias: "summary-public-model",
-				Thinking: &registry.ThinkingSupport{
-					Min: 1024,
-					Max: 16000,
-				},
 			}},
 		}},
 	})
@@ -260,20 +258,20 @@ func TestApplyRequestThinkingUsesExactClaudeModeForSummaryOnlyRequest(t *testing
 	if got := gjson.GetBytes(executor.translatedBody, "thinking.type").String(); got != "adaptive" {
 		t.Fatalf("pre-executor thinking.type = %q, want global adaptive trigger; body=%s", got, executor.translatedBody)
 	}
-	if got := gjson.GetBytes(response.Payload, "thinking.type").String(); got != "enabled" {
-		t.Fatalf("thinking.type = %q, want exact manual mode; body=%s", got, response.Payload)
+	if got := gjson.GetBytes(response.Payload, "thinking.type").String(); got != "adaptive" {
+		t.Fatalf("thinking.type = %q, want passthrough adaptive; body=%s", got, response.Payload)
 	}
-	if got := gjson.GetBytes(response.Payload, "thinking.budget_tokens").Int(); got != 1024 {
-		t.Fatalf("thinking.budget_tokens = %d, want exact minimum 1024; body=%s", got, response.Payload)
+	if gjson.GetBytes(response.Payload, "thinking.budget_tokens").Exists() {
+		t.Fatalf("passthrough must not synthesize a budget: %s", response.Payload)
 	}
 	if got := gjson.GetBytes(response.Payload, "thinking.display").String(); got != "summarized" {
 		t.Fatalf("thinking.display = %q, want summarized; body=%s", got, response.Payload)
 	}
-	if gjson.GetBytes(response.Payload, "output_config.effort").Exists() {
-		t.Fatalf("manual thinking retained adaptive effort: %s", response.Payload)
-	}
 }
 
+// Configured models pass the client's effort through without validation: the
+// selected credential binds the exact model definition while the requested
+// level reaches the upstream unchanged.
 func TestApplyRequestThinkingUsesSelectedPrefixedAPIKeyModel(t *testing.T) {
 	manager := cliproxyauth.NewManager(nil, nil, nil)
 	manager.SetConfig(&internalconfig.Config{
@@ -283,11 +281,10 @@ func TestApplyRequestThinkingUsesSelectedPrefixedAPIKeyModel(t *testing.T) {
 			Prefix: "tenant",
 			Models: []internalconfig.ClaudeModel{{
 				Name: "shared-upstream", Alias: "public-model",
-				Thinking: &registry.ThinkingSupport{Levels: []string{"high"}},
 			}},
 		}},
 	})
-	executor := &configuredThinkingExecutor{}
+	executor := &configuredThinkingExecutor{body: []byte(`{"thinking":{"type":"adaptive"},"output_config":{"effort":"max"}}`)}
 	manager.RegisterExecutor(executor)
 	auth := &cliproxyauth.Auth{
 		ID:       "selected-auth",
@@ -337,8 +334,8 @@ func TestApplyRequestThinkingUsesSelectedPrefixedAPIKeyModel(t *testing.T) {
 		if !executor.resolved {
 			t.Fatalf("%s request did not receive selected model capabilities", path)
 		}
-		if got := gjson.GetBytes(payload, "output_config.effort").String(); got != "high" {
-			t.Fatalf("%s output effort = %q, want selected credential capability high; body=%s", path, got, payload)
+		if got := gjson.GetBytes(payload, "output_config.effort").String(); got != "max" {
+			t.Fatalf("%s output effort = %q, want client effort passed through as max; body=%s", path, got, payload)
 		}
 	}
 

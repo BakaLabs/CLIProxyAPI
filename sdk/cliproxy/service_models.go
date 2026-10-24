@@ -742,7 +742,6 @@ func applyModelPrefixes(models []*ModelInfo, prefix string, forceModelPrefix boo
 		if clone.MetadataModelID == "" {
 			clone.MetadataModelID = baseID
 		}
-		clone.ExplicitThinking = model.ExplicitThinking
 		clone.ExplicitInputModalities = model.ExplicitInputModalities
 		addModel(&clone)
 	}
@@ -797,7 +796,6 @@ type modelEntry interface {
 	GetName() string
 	GetAlias() string
 	GetDisplayName() string
-	GetThinking() *registry.ThinkingSupport
 }
 
 type modelMaxContextLengthEntry interface {
@@ -862,21 +860,13 @@ func buildOpenAICompatibilityConfigModels(compat *config.OpenAICompatibility) []
 		if model.Image {
 			modelType = registry.OpenAIImageModelType
 		}
-		info := buildConfiguredModelInfo(model, compat.Name, modelType, now, strings.TrimSpace(model.Alias), false)
+		info := buildConfiguredModelInfo(model, compat.Name, modelType, now, strings.TrimSpace(model.Alias), true)
 		if info == nil {
 			continue
-		}
-		thinkingSupport := model.Thinking
-		if thinkingSupport == nil && !model.Image {
-			thinkingSupport = &registry.ThinkingSupport{Levels: []string{"low", "medium", "high"}}
-		}
-		if model.Thinking != nil {
-			info.ExplicitThinking = true
 		}
 		if len(model.InputModalities) > 0 {
 			info.ExplicitInputModalities = true
 		}
-		info.Thinking = modelconfig.NormalizeThinkingSupport(thinkingSupport)
 		info.SupportedInputModalities = normalizeCompatConfigModalities(model.InputModalities)
 		info.SupportedOutputModalities = normalizeCompatConfigModalities(model.OutputModalities)
 		models = append(models, info)
@@ -927,10 +917,10 @@ func buildConfigModels[T modelEntry](models []T, ownedBy, modelType, metadataCha
 			continue
 		}
 		seen[key] = struct{}{}
-		if model.GetThinking() != nil {
-			info.ExplicitThinking = true
-		}
-		if resolved := modelconfig.ResolveModelInfo(name, modelType, model.GetThinking()); resolved.Thinking != nil {
+		// Catalog-known upstream names keep their static capabilities (including
+		// thinking support) for model listings and translator capability checks;
+		// request-time thinking still passes through without validation.
+		if resolved := modelconfig.ResolveModelInfo(name, modelType); resolved.Thinking != nil {
 			info.Thinking = resolved.Thinking
 		}
 		if staticInfo := registry.LookupStaticModelInfoByChannel(name, metadataChannel); staticInfo != nil && staticInfo.NativeCapabilities != nil {
@@ -958,15 +948,6 @@ func buildVertexCompatConfigModels(entry *config.VertexCompatKey) []*ModelInfo {
 			}
 			if publisher, model, ok := strings.Cut(helps.NormalizeVertexOpenAPIModel(name), "/"); ok && strings.TrimSpace(publisher) != "" && strings.TrimSpace(model) != "" && !strings.EqualFold(strings.TrimSpace(publisher), "google") {
 				info.OwnedBy = strings.TrimSpace(publisher)
-			}
-			openAPI := helps.IsVertexOpenAPIModel(name)
-			if configured.OpenAPI != nil {
-				openAPI = *configured.OpenAPI
-			} else if entry.OpenAPI != nil {
-				openAPI = *entry.OpenAPI
-			}
-			if openAPI && info.Thinking == nil {
-				info.Thinking = &registry.ThinkingSupport{Levels: []string{"low", "medium", "high"}}
 			}
 			break
 		}
@@ -1064,9 +1045,8 @@ func appendVertexServiceAccountModels(cfg *config.Config, a *coreauth.Auth, base
 			Type:            "vertex",
 			DisplayName:     name,
 			UserDefined:     true,
-			Thinking:        &registry.ThinkingSupport{Levels: []string{"low", "medium", "high"}},
 		}
-		if resolved := modelconfig.ResolveModelInfo(name, "vertex", nil); resolved.Thinking != nil {
+		if resolved := modelconfig.ResolveModelInfo(name, "vertex"); resolved.Thinking != nil {
 			info.Thinking = resolved.Thinking
 		}
 		out = append(out, info)
@@ -1316,7 +1296,6 @@ func applyOAuthModelAliasEntries(aliases []config.OAuthModelAlias, models []*Mod
 			} else {
 				clone.MetadataModelID = id
 			}
-			clone.ExplicitThinking = model.ExplicitThinking
 			clone.ExplicitInputModalities = model.ExplicitInputModalities
 			if entry.displayName != "" {
 				clone.DisplayName = entry.displayName

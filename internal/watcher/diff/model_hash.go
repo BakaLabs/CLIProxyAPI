@@ -9,7 +9,6 @@ import (
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/modelconfig"
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 )
 
 // ComputeOpenAICompatModelsHash returns a stable hash for OpenAI-compat models.
@@ -56,11 +55,6 @@ func ComputeExcludedModelsHash(excluded []string) string {
 	data, _ := json.Marshal(normalized)
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
-}
-
-func thinkingHashSuffix(support *registry.ThinkingSupport) string {
-	data, _ := json.Marshal(support)
-	return "|thinking=" + string(data)
 }
 
 func normalizeModelPairs(collect func(out func(key string))) []string {

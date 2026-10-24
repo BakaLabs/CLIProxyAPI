@@ -461,7 +461,7 @@ func applyCodexClientModelCapabilities(entry map[string]any, id, metadataID stri
 			continue
 		}
 		isCodex := strings.EqualFold(strings.TrimSpace(p), "codex")
-		if (!isCodex && isAlias) || pInfo.ExplicitThinking {
+		if !isCodex && isAlias {
 			hasThinkingConstraint = true
 			pThinking := pInfo.Thinking
 			if pThinking == nil {
@@ -473,14 +473,6 @@ func applyCodexClientModelCapabilities(entry map[string]any, id, metadataID stri
 				constrainedThinking = intersectThinkingSupport(constrainedThinking, pThinking)
 			}
 		}
-	}
-	if !hasThinkingConstraint && info != nil && info.ExplicitThinking {
-		pThinking := info.Thinking
-		if pThinking == nil {
-			pThinking = &registry.ThinkingSupport{Levels: []string{}}
-		}
-		constrainedThinking = pThinking
-		hasThinkingConstraint = true
 	}
 	if hasThinkingConstraint && constrainedThinking != nil {
 		applyCodexClientThinkingMetadata(entry, constrainedThinking, clientVersion)

@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 )
 
 func TestComputeOpenAICompatModelsHash_Deterministic(t *testing.T) {
@@ -288,28 +287,5 @@ func TestComputeCodexModelsHash_Deterministic(t *testing.T) {
 	}
 	if h3 := ComputeCodexModelsHash([]config.CodexModel{{Name: "a"}}); h3 == h1 {
 		t.Fatalf("expected different hash when models change, got %s", h3)
-	}
-}
-
-func TestComputeModelHashesIncludeThinking(t *testing.T) {
-	low := &registry.ThinkingSupport{Levels: []string{"low"}}
-	high := &registry.ThinkingSupport{Levels: []string{"high"}}
-	tests := []struct {
-		name string
-		low  string
-		high string
-	}{
-		{name: "openai compatibility", low: ComputeOpenAICompatModelsHash([]config.OpenAICompatibilityModel{{Name: "m", Thinking: low}}), high: ComputeOpenAICompatModelsHash([]config.OpenAICompatibilityModel{{Name: "m", Thinking: high}})},
-		{name: "vertex", low: ComputeVertexCompatModelsHash([]config.VertexCompatModel{{Name: "m", Thinking: low}}), high: ComputeVertexCompatModelsHash([]config.VertexCompatModel{{Name: "m", Thinking: high}})},
-		{name: "claude", low: ComputeClaudeModelsHash([]config.ClaudeModel{{Name: "m", Thinking: low}}), high: ComputeClaudeModelsHash([]config.ClaudeModel{{Name: "m", Thinking: high}})},
-		{name: "codex", low: ComputeCodexModelsHash([]config.CodexModel{{Name: "m", Thinking: low}}), high: ComputeCodexModelsHash([]config.CodexModel{{Name: "m", Thinking: high}})},
-		{name: "gemini", low: ComputeGeminiModelsHash([]config.GeminiModel{{Name: "m", Thinking: low}}), high: ComputeGeminiModelsHash([]config.GeminiModel{{Name: "m", Thinking: high}})},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if tc.low == "" || tc.low == tc.high {
-				t.Fatalf("thinking capability must change model hash: %q / %q", tc.low, tc.high)
-			}
-		})
 	}
 }

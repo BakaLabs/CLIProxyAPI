@@ -546,13 +546,6 @@ upstream:
 #           display-name: "Gemini Flash" # optional catalog display name
 #           max-context-length: 1048576 # optional: override Codex client context window metadata
 #           is-compat: false             # optional: preserve thinking blocks with empty signatures for compatible upstreams
-#           thinking:                    # optional: exact thinking capability for this configured model
-#             levels: ["high", "medium", "low", "none", "auto"]
-#             # For budget-based models, replace levels with these capabilities:
-#             # min: 1024
-#             # max: 32768
-#             # zero-allowed: true
-#             # dynamic-allowed: true
 #       excluded-models:
 #         - "gemini-2.5-pro"     # exclude specific models from this provider (exact match)
 #         - "gemini-2.5-*"       # wildcard matching prefix (e.g. gemini-2.5-flash, gemini-2.5-pro)
@@ -604,8 +597,6 @@ upstream:
 #           alias: "native-gemini-flash" # client alias mapped to the upstream model
 #           max-context-length: 1048576 # optional: override Codex client context window metadata
 #           is-compat: false             # optional: preserve thinking blocks with empty signatures for compatible upstreams
-#           thinking:                    # optional: exact thinking capability for this configured model
-#             levels: ["high", "medium", "low", "none", "auto"]
 #       excluded-models:
 #         - "gemini-2.5-pro"
 #       keys:
@@ -632,8 +623,6 @@ upstream:
 #         - name: "gemini-2.5-flash"                # upstream model name
 #           alias: "vertex-flash"                   # client-visible alias
 #           display-name: "Vertex Flash"            # optional catalog display name
-#           thinking:                                # optional: exact thinking capability for this configured model
-#             levels: ["high", "medium", "low", "none", "auto"]
 #         - name: "gemini-2.5-pro"
 #           alias: "vertex-pro"
 #       excluded-models:                            # optional: models to exclude from listing
@@ -674,8 +663,6 @@ upstream:
 #           is-compat: false
 #           # Optional: enable configuration_update for this API-key model; omitted defaults to false.
 #           support-configuration-update: false
-#           thinking:              # optional: exact thinking capability for this configured model
-#             levels: ["xhigh", "high", "medium", "low"]
 #       excluded-models:
 #         - "gpt-5.1"         # exclude specific models (exact match)
 #         - "gpt-5-*"         # wildcard matching prefix (e.g. gpt-5-medium, gpt-5-codex)
@@ -718,8 +705,6 @@ upstream:
 #           max-context-length: 1048576         # optional: override Codex client context window metadata
 #           force-mapping: true                 # optional: rewrite response model fields back to the alias
 #           is-compat: false                    # optional: preserve thinking blocks with empty signatures for compatible upstreams
-#           thinking:                           # optional: exact thinking capability for this configured model
-#             levels: ["max", "xhigh", "high", "medium", "low", "minimal", "none", "auto"]
 #       excluded-models:
 #         - "claude-opus-4-5-20251101" # exclude specific models (exact match)
 #         - "claude-3-*"               # wildcard matching prefix (e.g. claude-3-7-sonnet-20250219)
@@ -834,8 +819,6 @@ upstream:
 #           max-context-length: 1048576 # optional: override Codex client context window metadata
 #           force-mapping: true     # optional: rewrite response model fields back to the alias
 #           is-compat: false        # optional: preserve thinking blocks with empty signatures for compatible upstreams
-#           thinking:               # optional: exact thinking capability for this configured model
-#             levels: ["xhigh", "high", "medium", "low"]
 #       excluded-models:
 #         - "grok-4.1"             # exclude specific models (exact match)
 #         - "grok-3-*"             # wildcard matching prefix
@@ -903,8 +886,6 @@ upstream:
 #           output-modalities: [text]       # optional: declare output modalities when known
 #           is-compat: false                # optional: preserve Claude thinking blocks for compatible upstreams
 #           use-max-completion-tokens: false # optional: default false (uses max_tokens); set true to use max_completion_tokens
-#           thinking:                      # optional: omit to default to levels ["low","medium","high"]. Exceeding levels (e.g. "max", "xhigh") are clamped to "high"; explicitly declare levels here if the upstream supports them
-#             levels: ["low", "medium", "high"]
 #         # You may repeat the same alias to build an internal model pool.
 #         # The client still sees only one alias in the model list.
 #         # Requests to that alias will round-robin across the upstream names below,

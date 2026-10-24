@@ -2,8 +2,6 @@ package config
 
 import (
 	"strings"
-
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 )
 
 // VertexCompatKey represents the configuration for Vertex AI-compatible API keys.
@@ -89,9 +87,6 @@ type VertexCompatModel struct {
 
 	// OpenAPI overrides endpoint selection for this model.
 	OpenAPI *bool `yaml:"openapi,omitempty" json:"openapi,omitempty"`
-
-	// Thinking configures the thinking/reasoning capability for this model.
-	Thinking *registry.ThinkingSupport `yaml:"thinking,omitempty" json:"thinking,omitempty"`
 }
 
 func (m VertexCompatModel) GetOpenAPI() *bool { return m.OpenAPI }
@@ -100,9 +95,6 @@ func (m VertexCompatModel) GetName() string        { return m.Name }
 func (m VertexCompatModel) GetAlias() string       { return m.Alias }
 func (m VertexCompatModel) GetDisplayName() string { return m.DisplayName }
 func (m VertexCompatModel) GetForceMapping() bool  { return m.ForceMapping }
-func (m VertexCompatModel) GetThinking() *registry.ThinkingSupport {
-	return m.Thinking
-}
 
 // SanitizeVertexCompatKeys deduplicates and normalizes Vertex-compatible API key credentials.
 func (cfg *Config) SanitizeVertexCompatKeys() {

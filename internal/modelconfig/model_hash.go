@@ -3,12 +3,10 @@ package modelconfig
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 )
 
 // ComputeOpenAICompatModelsHash returns a stable hash for OpenAI-compatible models.
@@ -20,7 +18,7 @@ func ComputeOpenAICompatModelsHash(models []config.OpenAICompatibilityModel) str
 			if name == "" && alias == "" {
 				continue
 			}
-			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|" + fmt.Sprintf("image=%t", model.Image) + "|" + fmt.Sprintf("force-mapping=%t", model.ForceMapping) + "|" + fmt.Sprintf("is-compat=%t", model.IsCompat) + "|" + fmt.Sprintf("use-max-completion-tokens=%t", model.UseMaxCompletionTokens) + "|input=" + strings.Join(normalizeModalities(model.InputModalities), ",") + "|output=" + strings.Join(normalizeModalities(model.OutputModalities), ",") + thinkingHashSuffix(model.Thinking))
+			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|" + fmt.Sprintf("image=%t", model.Image) + "|" + fmt.Sprintf("force-mapping=%t", model.ForceMapping) + "|" + fmt.Sprintf("is-compat=%t", model.IsCompat) + "|" + fmt.Sprintf("use-max-completion-tokens=%t", model.UseMaxCompletionTokens) + "|input=" + strings.Join(normalizeModalities(model.InputModalities), ",") + "|output=" + strings.Join(normalizeModalities(model.OutputModalities), ","))
 		}
 	})
 	return hashJoined(keys)
@@ -39,7 +37,7 @@ func ComputeVertexCompatModelsHash(models []config.VertexCompatModel) string {
 			if model.OpenAPI != nil {
 				key += fmt.Sprintf("|openapi=%t", *model.OpenAPI)
 			}
-			out(key + thinkingHashSuffix(model.Thinking))
+			out(key)
 		}
 	})
 	return hashJoined(keys)
@@ -54,7 +52,7 @@ func ComputeClaudeModelsHash(models []config.ClaudeModel) string {
 			if name == "" && alias == "" {
 				continue
 			}
-			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|" + fmt.Sprintf("force-mapping=%t", model.ForceMapping) + "|" + fmt.Sprintf("is-compat=%t", model.IsCompat) + thinkingHashSuffix(model.Thinking))
+			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|" + fmt.Sprintf("force-mapping=%t", model.ForceMapping) + "|" + fmt.Sprintf("is-compat=%t", model.IsCompat))
 		}
 	})
 	return hashJoined(keys)
@@ -69,7 +67,7 @@ func ComputeCodexModelsHash(models []config.CodexModel) string {
 			if name == "" && alias == "" {
 				continue
 			}
-			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|" + fmt.Sprintf("force-mapping=%t", model.ForceMapping) + "|" + fmt.Sprintf("is-compat=%t", model.IsCompat) + thinkingHashSuffix(model.Thinking))
+			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|" + fmt.Sprintf("force-mapping=%t", model.ForceMapping) + "|" + fmt.Sprintf("is-compat=%t", model.IsCompat))
 		}
 	})
 	return hashJoined(keys)
@@ -84,7 +82,7 @@ func ComputeGeminiModelsHash(models []config.GeminiModel) string {
 			if name == "" && alias == "" {
 				continue
 			}
-			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|" + fmt.Sprintf("force-mapping=%t", model.ForceMapping) + "|" + fmt.Sprintf("is-compat=%t", model.IsCompat) + thinkingHashSuffix(model.Thinking))
+			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|" + fmt.Sprintf("force-mapping=%t", model.ForceMapping) + "|" + fmt.Sprintf("is-compat=%t", model.IsCompat))
 		}
 	})
 	return hashJoined(keys)
@@ -105,11 +103,6 @@ func normalizeModalities(raw []string) []string {
 		out = append(out, value)
 	}
 	return out
-}
-
-func thinkingHashSuffix(support *registry.ThinkingSupport) string {
-	data, _ := json.Marshal(support)
-	return "|thinking=" + string(data)
 }
 
 func modelRoutingKeys(collect func(out func(key string))) []string {

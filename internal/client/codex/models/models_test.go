@@ -779,128 +779,6 @@ func TestCodexClientModelsResponse_OAuthAliasesInheritCanonicalMetadata(t *testi
 	}
 }
 
-func TestCodexClientModelsResponse_ExplicitRouteOverridesHonored(t *testing.T) {
-	modelRegistry := registry.GetGlobalRegistry()
-	clientID := "codex-route-override-test-client"
-	modelRegistry.RegisterClient(clientID, "codex", []*registry.ModelInfo{
-		{
-			ID:               "custom-sol",
-			MetadataModelID:  "gpt-5.6-sol",
-			DisplayName:      "Overridden Display Name",
-			MaxContextLength: 123456,
-			ExplicitThinking: true,
-			Thinking: &registry.ThinkingSupport{
-				Levels: []string{"low", "high"},
-			},
-		},
-		{
-			ID:               "custom-astra-explicit-no-ultra",
-			MetadataModelID:  "gpt-6-astra",
-			DisplayName:      "Astra Without Ultra",
-			ExplicitThinking: true,
-			Thinking: &registry.ThinkingSupport{
-				// Levels equal registry default (low..max) but explicitly defined by user
-				Levels: []string{"low", "medium", "high", "xhigh", "max"},
-			},
-		},
-		{
-			ID:               "gpt-6-astra",
-			DisplayName:      "Direct Canonical With Explicit Thinking",
-			ExplicitThinking: true,
-			Thinking: &registry.ThinkingSupport{
-				Levels: []string{"low", "high"},
-			},
-		},
-	})
-	t.Cleanup(func() {
-		modelRegistry.UnregisterClient(clientID)
-	})
-
-	availableModels := []map[string]any{
-		{
-			"id":                 "custom-sol",
-			"display_name":       "Overridden Display Name",
-			"max_context_length": 123456,
-		},
-		{
-			"id":           "custom-astra-explicit-no-ultra",
-			"display_name": "Astra Without Ultra",
-		},
-		{
-			"id":           "gpt-6-astra",
-			"display_name": "Direct Canonical With Explicit Thinking",
-		},
-	}
-
-	resp := BuildResponseForClient(availableModels, modelRegistry.GetModelProviders, false, "0.153.4")
-	models, ok := resp["models"].([]map[string]any)
-	if !ok || len(models) != 3 {
-		t.Fatalf("models = %#v, want three models", resp["models"])
-	}
-
-	entries := make(map[string]map[string]any, len(models))
-	for _, entry := range models {
-		entries[stringModelValue(entry, "slug")] = entry
-	}
-
-	entry := entries["custom-sol"]
-	if entry == nil {
-		t.Fatal("missing custom-sol")
-	}
-	if got := stringModelValue(entry, "slug"); got != "custom-sol" {
-		t.Errorf("slug = %q, want custom-sol", got)
-	}
-	if got := stringModelValue(entry, "display_name"); got != "Overridden Display Name" {
-		t.Errorf("display_name = %q, want Overridden Display Name", got)
-	}
-	if got := intModelValue(entry, "context_window"); got != 123456 {
-		t.Errorf("context_window = %d, want 123456", got)
-	}
-	if got := intModelValue(entry, "max_context_window"); got != 123456 {
-		t.Errorf("max_context_window = %d, want 123456", got)
-	}
-	if got := stringModelValue(entry, "comp_hash"); got != "3000" {
-		t.Errorf("comp_hash = %q, want 3000 (inherited from gpt-5.6-sol)", got)
-	}
-	// Assert reasoning levels were overridden to [low, high]
-	levels, okLevels := entry["supported_reasoning_levels"].([]any)
-	if !okLevels || len(levels) != 2 {
-		t.Fatalf("custom-sol supported_reasoning_levels = %#v, want [low, high]", entry["supported_reasoning_levels"])
-	}
-	if got := stringModelValue(entry, "default_reasoning_level"); got != "low" {
-		t.Errorf("default_reasoning_level = %q, want low", got)
-	}
-
-	// Assert custom-astra-explicit-no-ultra has exactly the 5 explicit levels and NO ultra
-	astraNoUltra := entries["custom-astra-explicit-no-ultra"]
-	if astraNoUltra == nil {
-		t.Fatal("missing custom-astra-explicit-no-ultra")
-	}
-	astraLevels, okAstraLevels := astraNoUltra["supported_reasoning_levels"].([]any)
-	if !okAstraLevels || len(astraLevels) != 5 {
-		t.Fatalf("custom-astra-explicit-no-ultra supported_reasoning_levels = %#v, want 5 levels", astraNoUltra["supported_reasoning_levels"])
-	}
-	for _, l := range astraLevels {
-		lMap, _ := l.(map[string]any)
-		if stringModelValue(lMap, "effort") == "ultra" {
-			t.Error("custom-astra-explicit-no-ultra must not contain 'ultra' because user explicitly excluded it")
-		}
-	}
-
-	// Assert direct canonical model gpt-6-astra also honors explicit thinking override
-	directAstra := entries["gpt-6-astra"]
-	if directAstra == nil {
-		t.Fatal("missing direct gpt-6-astra entry")
-	}
-	directLevels, okDirectLevels := directAstra["supported_reasoning_levels"].([]any)
-	if !okDirectLevels || len(directLevels) != 2 {
-		t.Fatalf("direct gpt-6-astra supported_reasoning_levels = %#v, want [low, high]", directAstra["supported_reasoning_levels"])
-	}
-	if got := stringModelValue(directAstra, "default_reasoning_level"); got != "low" {
-		t.Errorf("direct gpt-6-astra default_reasoning_level = %q, want low", got)
-	}
-}
-
 func TestCodexClientModelsResponse_UnrelatedCustomProviderRetainsFallback(t *testing.T) {
 	modelRegistry := registry.GetGlobalRegistry()
 	clientID := "codex-unrelated-custom-provider-test-client"
@@ -1134,13 +1012,16 @@ func TestCodexClientModelsResponse_MixedProvidersRestrictProtocolCapabilities(t 
 	}
 }
 
-func TestCodexClientModelsResponse_MixedProvidersIntersectCodexExplicitRestrictions(t *testing.T) {
+// An alias served by both Codex and a compat provider takes its reasoning
+// level constraint from the non-Codex provider; Codex declares no per-model
+// thinking levels of its own.
+func TestCodexClientModelsResponse_MixedProvidersUseCompatThinkingConstraint(t *testing.T) {
 	for _, tt := range []struct {
 		name       string
 		codexFirst bool
 	}{
-		{name: "codex_explicit_first", codexFirst: true},
-		{name: "compat_first_codex_explicit_second", codexFirst: false},
+		{name: "codex_first", codexFirst: true},
+		{name: "compat_first_codex_second", codexFirst: false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			modelRegistry := registry.GetGlobalRegistry()
@@ -1151,14 +1032,9 @@ func TestCodexClientModelsResponse_MixedProvidersIntersectCodexExplicitRestricti
 			registerCodex := func() {
 				modelRegistry.RegisterClient(clientCodex, "codex", []*registry.ModelInfo{
 					{
-						ID:               aliasName,
-						MetadataModelID:  "gpt-6-astra",
-						DisplayName:      "Astra Mixed Explicit",
-						ExplicitThinking: true,
-						Thinking: &registry.ThinkingSupport{
-							// Codex explicitly restricted to low, high
-							Levels: []string{"low", "high"},
-						},
+						ID:              aliasName,
+						MetadataModelID: "gpt-6-astra",
+						DisplayName:     "Astra Mixed Explicit",
 					},
 				})
 			}
@@ -1200,16 +1076,16 @@ func TestCodexClientModelsResponse_MixedProvidersIntersectCodexExplicitRestricti
 			}
 
 			entry := models[0]
-			// The intersection of [low, high] and [low, medium, high] is exactly [low, high]
+			// The compat provider's declared levels constrain the alias.
 			levels, okLevels := entry["supported_reasoning_levels"].([]any)
-			if !okLevels || len(levels) != 2 {
-				t.Fatalf("supported_reasoning_levels = %#v, want exactly 2 levels (low, high)", entry["supported_reasoning_levels"])
+			if !okLevels || len(levels) != 3 {
+				t.Fatalf("supported_reasoning_levels = %#v, want exactly 3 levels (low, medium, high)", entry["supported_reasoning_levels"])
 			}
 			for _, l := range levels {
 				lMap, _ := l.(map[string]any)
 				effort := stringModelValue(lMap, "effort")
-				if effort == "medium" || effort == "ultra" || effort == "max" || effort == "xhigh" {
-					t.Errorf("mixed route must not contain %q because Codex explicitly excluded it", effort)
+				if effort == "ultra" || effort == "max" || effort == "xhigh" {
+					t.Errorf("mixed route must not contain %q because the compat provider excluded it", effort)
 				}
 			}
 		})

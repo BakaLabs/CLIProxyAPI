@@ -4,7 +4,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	"gopkg.in/yaml.v3"
 )
 
@@ -79,9 +78,6 @@ func TestCloneForRuntimeDeepCopiesConfig(t *testing.T) {
 	if got := pluginRawScalar(t, clone.Plugins.Configs["sample"].Raw, "mode"); got != "first" {
 		t.Fatalf("clone plugin raw mode = %q, want first", got)
 	}
-	if clone.OpenAICompatibility[0].Models[0].Thinking.Levels[0] != "low" {
-		t.Fatalf("clone thinking level = %q, want low", clone.OpenAICompatibility[0].Models[0].Thinking.Levels[0])
-	}
 	if got := clone.Payload.Default[0].Params["object"].(map[string]any)["key"]; got != "value" {
 		t.Fatalf("clone payload object key = %#v, want value", got)
 	}
@@ -89,7 +85,6 @@ func TestCloneForRuntimeDeepCopiesConfig(t *testing.T) {
 	clone.APIKeys[0] = "clone-client-key"
 	clone.OAuthExcludedModels["codex"][0] = "clone-hidden-model"
 	clone.OAuthModelAlias["codex"][0].Alias = "clone-client-model"
-	clone.OpenAICompatibility[0].Models[0].Thinking.Levels[0] = "clone-low"
 	clone.Payload.Default[0].Params["object"].(map[string]any)["key"] = "clone-value"
 	plugin := clone.Plugins.Configs["sample"]
 	setPluginRawScalar(t, &plugin.Raw, "mode", "third")
@@ -106,9 +101,6 @@ func TestCloneForRuntimeDeepCopiesConfig(t *testing.T) {
 	}
 	if got := pluginRawScalar(t, cfg.Plugins.Configs["sample"].Raw, "mode"); got != "second" {
 		t.Fatalf("cfg plugin raw mode = %q, want second", got)
-	}
-	if cfg.OpenAICompatibility[0].Models[0].Thinking.Levels[0] != "mutated-low" {
-		t.Fatalf("cfg thinking level = %q, want mutated-low", cfg.OpenAICompatibility[0].Models[0].Thinking.Levels[0])
 	}
 	if got := cfg.Payload.Default[0].Params["object"].(map[string]any)["key"]; got != "mutated-value" {
 		t.Fatalf("cfg payload object key = %#v, want mutated-value", got)
@@ -190,9 +182,8 @@ func sampleCloneRuntimeConfig() *Config {
 			Name:          "compat",
 			APIKeyEntries: []OpenAICompatibilityAPIKey{{APIKey: "compat-key", ProxyURL: "http://proxy.local"}},
 			Models: []OpenAICompatibilityModel{{
-				Name:     "compat-upstream",
-				Alias:    "compat-client",
-				Thinking: &registry.ThinkingSupport{Levels: []string{"low", "high"}},
+				Name:  "compat-upstream",
+				Alias: "compat-client",
 			}},
 			Headers: map[string]string{"X-Compat": "one"},
 		}},
@@ -234,7 +225,6 @@ func mutateOriginalConfig(cfg *Config) {
 	cfg.APIKeys[0] = "mutated-client-key"
 	cfg.OAuthExcludedModels["codex"][0] = "mutated-hidden-model"
 	cfg.OAuthModelAlias["codex"][0].Alias = "mutated-client-model"
-	cfg.OpenAICompatibility[0].Models[0].Thinking.Levels[0] = "mutated-low"
 	cfg.Payload.Default[0].Params["object"].(map[string]any)["key"] = "mutated-value"
 	plugin := cfg.Plugins.Configs["sample"]
 	setPluginRawScalar(nil, &plugin.Raw, "mode", "second")

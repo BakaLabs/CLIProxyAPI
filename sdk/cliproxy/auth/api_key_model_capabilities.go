@@ -248,13 +248,13 @@ func lookupUnlistedCodexAPIKeyModelCapability(routing *apiKeyModelRoutingSnapsho
 	}
 	for _, configured := range entry.Models {
 		if strings.EqualFold(strings.TrimSpace(configured.Name), strings.TrimSpace(upstreamModel)) || configuredUpstreamFallbackMatches(configured.Name, upstreamModel) {
-			info := modelconfig.ResolveModelInfo(upstreamModel, "codex", configured.Thinking)
+			info := modelconfig.ResolveModelInfo(upstreamModel, "codex")
 			info.SupportConfigurationUpdate = configured.SupportConfigurationUpdate
 			info.IsCompat = configured.IsCompat
 			return info, true
 		}
 	}
-	info := modelconfig.ResolveModelInfo(upstreamModel, "codex", nil)
+	info := modelconfig.ResolveModelInfo(upstreamModel, "codex")
 	info.SupportConfigurationUpdate = false
 	return info, true
 }
@@ -386,7 +386,7 @@ func compileAPIKeyModelCapabilitiesForAuth(cfg *internalconfig.Config, auth *Aut
 		if entry := resolveCodexAPIKeyConfig(cfg, auth); entry != nil {
 			for i := range entry.Models {
 				configured := entry.Models[i]
-				info := addConfiguredModelCapability(out, configured.Name, configured.Alias, "codex", configured.Thinking, configured.IsCompat)
+				info := addConfiguredModelCapability(out, configured.Name, configured.Alias, "codex", configured.IsCompat)
 				if info != nil {
 					info.SupportConfigurationUpdate = configured.SupportConfigurationUpdate
 				}
@@ -399,17 +399,7 @@ func compileAPIKeyModelCapabilitiesForAuth(cfg *internalconfig.Config, auth *Aut
 	case "vertex":
 		if entry := resolveVertexAPIKeyConfig(cfg, auth); entry != nil {
 			for _, configured := range entry.Models {
-				support := configured.Thinking
-				openAPI := isVertexOpenAPIConfigModel(configured.Name)
-				if configured.OpenAPI != nil {
-					openAPI = *configured.OpenAPI
-				} else if entry.OpenAPI != nil {
-					openAPI = *entry.OpenAPI
-				}
-				if support == nil && openAPI && modelconfig.ResolveModelInfo(configured.Name, "gemini", nil).Thinking == nil {
-					support = &registry.ThinkingSupport{Levels: []string{"low", "medium", "high"}}
-				}
-				addConfiguredModelCapability(out, configured.Name, configured.Alias, "gemini", support, false)
+				addConfiguredModelCapability(out, configured.Name, configured.Alias, "gemini", false)
 			}
 		}
 	case "meta":
@@ -435,28 +425,23 @@ func compileAPIKeyModelCapabilitiesForAuth(cfg *internalconfig.Config, auth *Aut
 func compileConfiguredModelCapabilities[T interface {
 	GetName() string
 	GetAlias() string
-	GetThinking() *registry.ThinkingSupport
 }](out map[string][]apiKeyModelCapabilityRoute, models []T, modelType string) {
 	for i := range models {
 		isCompat := false
 		if compatModel, okCompat := any(models[i]).(interface{ GetIsCompat() bool }); okCompat {
 			isCompat = compatModel.GetIsCompat()
 		}
-		addConfiguredModelCapability(out, models[i].GetName(), models[i].GetAlias(), modelType, models[i].GetThinking(), isCompat)
+		addConfiguredModelCapability(out, models[i].GetName(), models[i].GetAlias(), modelType, isCompat)
 	}
 }
 
 func compileOpenAICompatibleModelCapabilities(out map[string][]apiKeyModelCapabilityRoute, models []internalconfig.OpenAICompatibilityModel) {
 	for i := range models {
-		support := models[i].Thinking
-		if support == nil && !models[i].Image {
-			support = &registry.ThinkingSupport{Levels: []string{"low", "medium", "high"}}
-		}
-		addConfiguredModelCapability(out, models[i].Name, models[i].Alias, "openai-compatibility", support, models[i].IsCompat)
+		addConfiguredModelCapability(out, models[i].Name, models[i].Alias, "openai-compatibility", models[i].IsCompat)
 	}
 }
 
-func addConfiguredModelCapability(out map[string][]apiKeyModelCapabilityRoute, name, alias, modelType string, support *registry.ThinkingSupport, isCompat bool) *registry.ModelInfo {
+func addConfiguredModelCapability(out map[string][]apiKeyModelCapabilityRoute, name, alias, modelType string, isCompat bool) *registry.ModelInfo {
 	name = strings.TrimSpace(name)
 	alias = strings.TrimSpace(alias)
 	if name == "" {
@@ -468,7 +453,16 @@ func addConfiguredModelCapability(out map[string][]apiKeyModelCapabilityRoute, n
 	if name == "" {
 		return nil
 	}
-	modelInfo := modelconfig.ResolveModelInfo(name, modelType, support)
+	modelInfo := modelconfig.ResolveModelInfo(name, modelType)
+	// Configured models pass client thinking levels through without validation,
+	// so no level/budget declaration may constrain them. Only the catalog way of
+	// turning thinking off is kept (e.g. between_tools on claude-sonnet-5-5).
+	modelInfo.UserDefined = true
+	if modelInfo.Thinking != nil && modelInfo.Thinking.DisableType != "" {
+		modelInfo.Thinking = &registry.ThinkingSupport{DisableType: modelInfo.Thinking.DisableType}
+	} else {
+		modelInfo.Thinking = nil
+	}
 	modelInfo.IsCompat = isCompat
 	route := apiKeyModelCapabilityRoute{upstreamModel: name, modelInfo: modelInfo}
 	seenKeys := make(map[string]struct{})
@@ -496,20 +490,4 @@ func addConfiguredModelCapability(out map[string][]apiKeyModelCapabilityRoute, n
 		}
 	}
 	return modelInfo
-}
-
-// isVertexOpenAPIConfigModel recognizes partner models without depending on executors.
-func isVertexOpenAPIConfigModel(model string) bool {
-	base := strings.TrimSpace(thinking.ParseSuffix(model).ModelName)
-	if strings.HasPrefix(strings.ToLower(base), "publishers/") {
-		publisher, tail, ok := strings.Cut(base[len("publishers/"):], "/")
-		if !ok || !strings.HasPrefix(strings.ToLower(tail), "models/") {
-			return false
-		}
-		base = strings.TrimSpace(publisher) + "/" + strings.TrimSpace(tail[len("models/"):])
-	}
-	publisher, name, ok := strings.Cut(base, "/")
-	publisher, name = strings.TrimSpace(publisher), strings.TrimSpace(name)
-	return ok && publisher != "" && name != "" && !strings.Contains(name, "/") &&
-		!strings.EqualFold(publisher, "google") && !strings.EqualFold(publisher, "models") && !strings.EqualFold(publisher, "publishers")
 }

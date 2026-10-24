@@ -178,7 +178,7 @@ func TestRegisterModelsForAuth_VertexCompatAPIKey_OpenAPISettingsAndThinking(t *
 	if dsInfo.OwnedBy != "deepseek-ai" {
 		t.Fatalf("deepseek-flash OwnedBy = %q, want deepseek-ai", dsInfo.OwnedBy)
 	}
-	if dsInfo.Thinking == nil || len(dsInfo.Thinking.Levels) == 0 {
-		t.Fatalf("expected default Thinking support on Vertex OpenAPI model 'deepseek-flash', got %+v", dsInfo.Thinking)
+	if dsInfo.Thinking != nil || !dsInfo.UserDefined {
+		t.Fatalf("deepseek-flash thinking = %+v user-defined = %t, want nil thinking with passthrough", dsInfo.Thinking, dsInfo.UserDefined)
 	}
 }
