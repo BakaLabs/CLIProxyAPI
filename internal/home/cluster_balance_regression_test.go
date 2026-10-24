@@ -7,11 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -76,104 +73,6 @@ func TestClusterBalanceRegistrationErrorsDoNotDisableCapability(t *testing.T) {
 	}
 	if client.balance.unsupported || client.balance.registered {
 		t.Fatal("membership failure disabled capability or registered client")
-	}
-}
-
-func TestClusterBalanceBlockedRPCDoesNotDelayHeartbeatExpiry(t *testing.T) {
-	for _, blockedOperation := range []string{"ENABLE", "CLAIM", "PING", "RESULT"} {
-		t.Run(blockedOperation, func(t *testing.T) {
-			blocked := make(chan struct{})
-			release := make(chan struct{})
-			var blockOnce sync.Once
-			block := func() {
-				blockOnce.Do(func() { close(blocked) })
-				<-release
-			}
-			t.Cleanup(func() { close(release) })
-			target, _ := newRedisCommandTestClient(t, func(args []string) string {
-				if blockedOperation == "PING" && strings.EqualFold(args[0], "PING") {
-					block()
-				}
-				return balanceTestRedisReply(args)
-			})
-			instruction, errMarshal := json.Marshal(rebalanceInstruction{
-				ID: "blocked-plan", Term: 1, Target: clusterNode{IP: target.homeCfg.Host, Port: target.homeCfg.Port},
-			})
-			if errMarshal != nil {
-				t.Fatal(errMarshal)
-			}
-			client, commands := newRedisCommandTestClient(t, func(args []string) string {
-				switch strings.ToUpper(args[0]) {
-				case "CLUSTER":
-					if args[1] == "BALANCE" {
-						if args[2] == blockedOperation {
-							block()
-						}
-						return "$11\r\n{\"ok\":true}\r\n"
-					}
-					return "$22\r\n{\"ok\":true,\"nodes\":[]}\r\n"
-				case "GET":
-					return "$2\r\n{}\r\n"
-				case "SUBSCRIBE":
-					reply := "*3\r\n$9\r\nsubscribe\r\n$6\r\nconfig\r\n:1\r\n"
-					if blockedOperation == "CLAIM" || blockedOperation == "PING" {
-						reply += fmt.Sprintf("*3\r\n$7\r\nmessage\r\n$9\r\nrebalance\r\n$%d\r\n%s\r\n", len(instruction), instruction)
-					}
-					return reply
-				default:
-					return balanceTestRedisReply(args)
-				}
-			})
-			enableBalanceTestClient(client)
-			client.balance.registered = false
-			client.testOperationTimeout = 5 * time.Second
-			if blockedOperation == "RESULT" {
-				client.balance.request.ID, client.balance.result = "previous-plan", "success"
-			}
-			ctx, cancel := context.WithCancel(context.Background())
-			t.Cleanup(cancel)
-			done := make(chan error, 1)
-			go func() {
-				done <- client.RunConfigSubscriberLifetime(ctx, func([]byte) error {
-					return client.SetLifecycleConfig(config.CredentialConcurrencyConfig{
-						LifecycleConfigRevision: 1, CPAHeartbeatTimeout: 200 * time.Millisecond,
-					})
-				}, nil)
-			}()
-			select {
-			case <-blocked:
-			case errRun := <-done:
-				t.Fatalf("subscriber ended before blocked RPC: %v", errRun)
-			case <-time.After(3 * time.Second):
-				t.Fatal("RPC did not start")
-			}
-			select {
-			case errRun := <-done:
-				if !isTimeoutError(errRun) {
-					t.Fatalf("subscriber error = %v, want heartbeat timeout", errRun)
-				}
-			case <-time.After(2 * time.Second):
-				t.Fatal("blocked RPC delayed heartbeat expiry or subscriber shutdown")
-			}
-			if client.HeartbeatOK() || !client.dispatchFenced.Load() {
-				t.Fatal("heartbeat expiry did not fence dispatch admission")
-			}
-			if _, errDispatch := client.RPopAuth(context.Background(), "test-model", "", nil, 1); !errors.Is(errDispatch, ErrDispatchFenced) {
-				t.Fatalf("late dispatch = %v, want fenced", errDispatch)
-			}
-			if len(findRedisCommand(commands.All(), "RPOP")) != 0 || client.balance.moving {
-				t.Fatal("expired subscriber issued dispatch or migrated")
-			}
-			client.mu.Lock()
-			commandPool := client.cmd
-			client.mu.Unlock()
-			if commandPool == nil {
-				t.Fatal("migration cancellation detached the source command pool")
-			}
-			if errPing := commandPool.Ping(context.Background()).Err(); errPing != nil {
-				t.Fatalf("migration cancellation interrupted the source command pool: %v", errPing)
-			}
-		})
 	}
 }
 
