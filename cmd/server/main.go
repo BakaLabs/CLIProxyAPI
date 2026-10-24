@@ -50,10 +50,13 @@ var (
 	DefaultConfigPath = ""
 )
 
+// forkVersionSuffix marks binaries built from this fork.
+const forkVersionSuffix = "-s"
+
 // init initializes the shared logger setup.
 func init() {
 	logging.SetupBaseLogger()
-	buildinfo.Version = Version
+	buildinfo.Version = Version + forkVersionSuffix
 	buildinfo.Commit = Commit
 	buildinfo.BuildDate = BuildDate
 }
