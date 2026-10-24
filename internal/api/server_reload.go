@@ -13,6 +13,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/managementasset"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/redisqueue"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/requestdb"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor"
 	responsesclaude "github.com/router-for-me/CLIProxyAPI/v8/internal/translator/claude/openai/responses"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
@@ -98,6 +99,15 @@ func (s *Server) UpdateClientsContext(ctx context.Context, cfg *config.Config) b
 
 	if oldCfg == nil || oldCfg.RedisUsageQueueRetentionSeconds != cfg.RedisUsageQueueRetentionSeconds {
 		redisqueue.SetRetentionSeconds(cfg.RedisUsageQueueRetentionSeconds)
+	}
+
+	if oldCfg == nil ||
+		oldCfg.RequestDBEnabled != cfg.RequestDBEnabled ||
+		oldCfg.RequestDBPath != cfg.RequestDBPath ||
+		oldCfg.RequestDBRetentionDays != cfg.RequestDBRetentionDays ||
+		oldCfg.RequestDBPreviewBytes != cfg.RequestDBPreviewBytes ||
+		oldCfg.RequestDBErrorBodyMaxBytes != cfg.RequestDBErrorBodyMaxBytes {
+		requestdb.ApplyConfig(cfg)
 	}
 
 	if s.requestLogger != nil && (oldCfg == nil || oldCfg.ErrorLogsMaxFiles != cfg.ErrorLogsMaxFiles) {

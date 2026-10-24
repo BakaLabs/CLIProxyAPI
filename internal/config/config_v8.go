@@ -105,6 +105,9 @@ func buildV8Paths() []configPath {
 		{"debug", "observability.logs.debug"}, {"logging-to-file", "observability.logs.logging-to-file"},
 		{"logs-max-total-size-mb", "observability.logs.logs-max-total-size-mb"}, {"request-log", "observability.logs.request-log"},
 		{"error-logs-max-files", "observability.logs.error-logs-max-files"},
+		{"request-db-enabled", "observability.request-db.enabled"}, {"request-db-path", "observability.request-db.path"},
+		{"request-db-retention-days", "observability.request-db.retention-days"}, {"request-db-preview-bytes", "observability.request-db.preview-bytes"},
+		{"request-db-error-body-max-bytes", "observability.request-db.error-body-max-bytes"},
 		{"usage-statistics-enabled", "observability.usage.usage-statistics-enabled"},
 		{"redis-usage-queue-retention-seconds", "observability.usage.redis-usage-queue-retention-seconds"}, {"pprof", "observability.pprof"},
 	}

@@ -28,6 +28,11 @@ func ParseConfigBytes(data []byte) (*Config, error) {
 	cfg.ErrorLogsMaxFiles = 10
 	cfg.UsageStatisticsEnabled = false
 	cfg.RedisUsageQueueRetentionSeconds = 60
+	cfg.RequestDBEnabled = true
+	cfg.RequestDBPath = ""
+	cfg.RequestDBRetentionDays = 30
+	cfg.RequestDBPreviewBytes = 0
+	cfg.RequestDBErrorBodyMaxBytes = 8192
 	cfg.DisableCooling = false
 	cfg.SaveCooldownStatus = false
 	cfg.TransientErrorCooldownSeconds = 0
@@ -97,6 +102,16 @@ func ParseConfigBytes(data []byte) (*Config, error) {
 	} else if cfg.RedisUsageQueueRetentionSeconds > 3600 {
 		log.WithField("value", cfg.RedisUsageQueueRetentionSeconds).Warn("redis-usage-queue-retention-seconds too large; clamping to 3600")
 		cfg.RedisUsageQueueRetentionSeconds = 3600
+	}
+
+	if cfg.RequestDBRetentionDays < 0 {
+		cfg.RequestDBRetentionDays = 30
+	}
+	if cfg.RequestDBPreviewBytes < 0 {
+		cfg.RequestDBPreviewBytes = 0
+	}
+	if cfg.RequestDBErrorBodyMaxBytes <= 0 {
+		cfg.RequestDBErrorBodyMaxBytes = 8192
 	}
 
 	if cfg.MaxRetryCredentials < 0 {

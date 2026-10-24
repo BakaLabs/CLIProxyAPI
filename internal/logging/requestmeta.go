@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 )
 
 type endpointKey struct{}
@@ -23,6 +25,25 @@ type ClientRequestMetadata struct {
 	NodeKind         string
 	IsFork           bool
 	IsCompaction     bool
+	// Headers holds a masked clone of the downstream request headers so async
+	// consumers never touch the pooled gin request after the handler returns.
+	Headers http.Header
+}
+
+// MaskedHeaderClone returns a copy of headers with sensitive values masked.
+func MaskedHeaderClone(headers http.Header) http.Header {
+	if len(headers) == 0 {
+		return nil
+	}
+	clone := make(http.Header, len(headers))
+	for key, values := range headers {
+		masked := make([]string, len(values))
+		for i, value := range values {
+			masked[i] = util.MaskSensitiveHeaderValue(key, value)
+		}
+		clone[key] = masked
+	}
+	return clone
 }
 
 type responseStatusHolder struct {

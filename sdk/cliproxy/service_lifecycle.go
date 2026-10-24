@@ -11,6 +11,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/home"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/redisqueue"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/requestdb"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v8/sdk/access"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
@@ -388,6 +389,10 @@ func (s *Service) Shutdown(ctx context.Context) error {
 				s.accessManager.SetProviders(sdkaccess.RegisteredProviders())
 			}
 		}
+
+		// Flush and close the fork-local request database before the usage
+		// dispatcher stops so no queued record is lost mid-shutdown.
+		requestdb.Shutdown()
 
 		usage.StopDefault()
 	})

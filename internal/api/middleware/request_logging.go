@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/klauspost/compress/zstd"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/requestdb"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	log "github.com/sirupsen/logrus"
 )
@@ -73,6 +74,16 @@ func RequestLoggingMiddleware(logger logging.RequestLogger) gin.HandlerFunc {
 		c.Writer = wrapper
 		attachRequestLogSources(c, logger, loggerEnabled)
 		attachDeferredRequestBodyCapture(c.Request, logger, requestInfo, loggerEnabled, captureBody)
+
+		// Fork-local request database: capture body previews when enabled.
+		if previewLimit := requestdb.PreviewBytes(); previewLimit > 0 {
+			if holder := attachContentPreviewHolder(c, previewLimit); holder != nil {
+				if requestInfo != nil {
+					holder.SetRequestPreview(requestInfo.Body)
+				}
+				c.Writer = &previewResponseWriter{ResponseWriter: c.Writer, holder: holder}
+			}
+		}
 
 		// Process the request
 		c.Next()

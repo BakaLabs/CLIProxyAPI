@@ -84,6 +84,29 @@ type SDKConfig struct {
 	// RequestLog enables or disables detailed request logging functionality.
 	RequestLog bool `yaml:"request-log" json:"request-log"`
 
+	// RequestDBEnabled enables the fork-local SQLite request metadata store
+	// (observability.request-db in the v8 layout). It is independent of
+	// RequestLog and captures metadata only, never full message bodies.
+	// Enabled by default; set to false to opt out.
+	RequestDBEnabled bool `yaml:"request-db-enabled" json:"request-db-enabled"`
+
+	// RequestDBPath overrides the SQLite database file location. Empty uses
+	// "<auth-dir>/requestlog.db". Relative paths resolve against the auth dir.
+	RequestDBPath string `yaml:"request-db-path" json:"request-db-path"`
+
+	// RequestDBRetentionDays deletes stored entries older than this many days.
+	// 0 keeps entries forever; negative values fall back to the default (30).
+	RequestDBRetentionDays int `yaml:"request-db-retention-days" json:"request-db-retention-days"`
+
+	// RequestDBPreviewBytes stores the first N bytes of the decoded request
+	// body and of the response stream per request. 0 (default) stores no
+	// message content at all.
+	RequestDBPreviewBytes int `yaml:"request-db-preview-bytes" json:"request-db-preview-bytes"`
+
+	// RequestDBErrorBodyMaxBytes caps the stored upstream error body length for
+	// failed requests. <= 0 falls back to the default (8192).
+	RequestDBErrorBodyMaxBytes int `yaml:"request-db-error-body-max-bytes" json:"request-db-error-body-max-bytes"`
+
 	// CodexOrphanDelegationCompatibility mirrors the provider-wide runtime setting for API handlers.
 	CodexOrphanDelegationCompatibility bool `yaml:"-" json:"-"`
 

@@ -1157,6 +1157,28 @@ observability:
     # Record proxy request/response logs. Management requests are excluded.
     request-log: false
 
+  # Fork-local SQLite request metadata store, independent of request-log.
+  # Captures per-request metadata (tokens, models, tiers, headers, latency)
+  # for later usage analytics and live logs. Message bodies are never stored.
+  request-db:
+    # Enable the request metadata store. Enabled by default; set to false to opt out.
+    enabled: true
+
+    # SQLite database file location. Empty uses "<auth-dir>/requestlog.db";
+    # relative paths resolve against the auth dir.
+    path: ""
+
+    # Delete stored entries older than this many days. 0 keeps entries forever.
+    retention-days: 30
+
+    # When > 0, also store the first N bytes of the decoded request body and of
+    # the response stream per request (zstd-compressed). 0 (default) stores no
+    # message content at all.
+    preview-bytes: 0
+
+    # Maximum stored length of the upstream error body for failed requests.
+    error-body-max-bytes: 8192
+
   usage:
     # When false, disable in-memory usage statistics aggregation
     usage-statistics-enabled: false
