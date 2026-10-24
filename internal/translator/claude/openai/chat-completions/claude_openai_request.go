@@ -63,53 +63,24 @@ func convertOpenAIRequestToClaude(modelName string, inputRawJSON []byte, stream,
 	root := gjson.ParseBytes(rawJSON)
 
 	// Convert OpenAI reasoning_effort to Claude thinking config.
+	// The level word passes through verbatim: both formats express thinking
+	// intensity as discrete words, so "max" stays "max". Whether the target
+	// model accepts the level is decided by the thinking pipeline and upstream.
+	// "auto" maps to omitting thinking entirely so the upstream default applies
+	// regardless of whether the model is adaptive or budget-only.
 	if v := root.Get("reasoning_effort"); v.Exists() {
 		effort := strings.ToLower(strings.TrimSpace(v.String()))
-		if effort != "" {
-			mi := registry.LookupModelInfo(modelName, "claude")
-			supportsAdaptive := mi != nil && mi.Thinking != nil && len(mi.Thinking.Levels) > 0
-			supportsMax := supportsAdaptive && thinking.HasLevel(mi.Thinking.Levels, string(thinking.LevelMax))
-
-			// Claude 4.6 supports adaptive thinking with output_config.effort.
-			// MapToClaudeEffort normalizes levels (e.g. minimal→low, xhigh→high) to avoid
-			// validation errors since validate treats same-provider unsupported levels as errors.
-			if supportsAdaptive {
-				switch effort {
-				case "none":
-					out, _ = sjson.SetBytes(out, "thinking.type", "disabled")
-					out, _ = sjson.DeleteBytes(out, "thinking.budget_tokens")
-					out, _ = sjson.DeleteBytes(out, "output_config.effort")
-				case "auto":
-					out, _ = sjson.SetBytes(out, "thinking.type", "adaptive")
-					out, _ = sjson.DeleteBytes(out, "thinking.budget_tokens")
-					out, _ = sjson.DeleteBytes(out, "output_config.effort")
-				default:
-					if !thinking.HasLevel(mi.Thinking.Levels, effort) {
-						if mapped, ok := thinking.MapToClaudeEffort(effort, supportsMax); ok {
-							effort = mapped
-						}
-					}
-					out, _ = sjson.SetBytes(out, "thinking.type", "adaptive")
-					out, _ = sjson.DeleteBytes(out, "thinking.budget_tokens")
-					out, _ = sjson.SetBytes(out, "output_config.effort", effort)
-				}
-			} else {
-				// Legacy/manual thinking (budget_tokens).
-				budget, ok := thinking.ConvertLevelToBudget(effort)
-				if ok {
-					switch budget {
-					case 0:
-						out, _ = sjson.SetBytes(out, "thinking.type", "disabled")
-					case -1:
-						out, _ = sjson.SetBytes(out, "thinking.type", "enabled")
-					default:
-						if budget > 0 {
-							out, _ = sjson.SetBytes(out, "thinking.type", "enabled")
-							out, _ = sjson.SetBytes(out, "thinking.budget_tokens", budget)
-						}
-					}
-				}
-			}
+		switch effort {
+		case "":
+		case "auto":
+		case "none":
+			out, _ = sjson.SetBytes(out, "thinking.type", "disabled")
+			out, _ = sjson.DeleteBytes(out, "thinking.budget_tokens")
+			out, _ = sjson.DeleteBytes(out, "output_config.effort")
+		default:
+			out, _ = sjson.SetBytes(out, "thinking.type", "adaptive")
+			out, _ = sjson.DeleteBytes(out, "thinking.budget_tokens")
+			out, _ = sjson.SetBytes(out, "output_config.effort", effort)
 		}
 	}
 

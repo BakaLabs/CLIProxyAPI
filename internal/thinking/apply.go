@@ -365,7 +365,10 @@ func applyThinking(body, sourceBody []byte, model string, fromFormat string, toF
 		}
 		return applySummaryConfigForProvider(body, providerFormat, baseModel, providerKey, modelInfo, summaryConfig), nil
 	}
-	if modelInfoResolved && config.Mode == ModeLevel && modelInfo != nil && modelInfo.Thinking != nil && shouldMapConfiguredHighIntent(fromFormat, providerFormat, modelInfo) {
+	// High-intent levels (xhigh/max) resolve to the strongest effort the model
+	// actually declares, on every path that knows the exact model definition —
+	// not just executor-resolved API-key attempts.
+	if config.Mode == ModeLevel && modelInfo != nil && modelInfo.Thinking != nil && shouldMapConfiguredHighIntent(fromFormat, providerFormat, modelInfo) {
 		config.Level = mapConfiguredHighIntent(config.Level, modelInfo)
 	}
 

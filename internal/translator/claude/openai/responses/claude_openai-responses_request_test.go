@@ -3145,3 +3145,36 @@ func TestConvertOpenAIResponsesRequestToClaude_DropsEmptyAndWhitespaceTextBlocks
 		}
 	})
 }
+
+func TestConvertOpenAIResponsesRequestToClaude_ReasoningEffortPassthrough(t *testing.T) {
+	tests := []struct {
+		name       string
+		model      string
+		effort     string
+		wantType   string
+		wantEffort string
+	}{
+		{name: "max stays max on non-catalog model", model: "deepseek-v4.1-flash", effort: "max", wantType: "adaptive", wantEffort: "max"},
+		{name: "xhigh stays xhigh", model: "deepseek-v4.1-flash", effort: "xhigh", wantType: "adaptive", wantEffort: "xhigh"},
+		{name: "max stays max despite catalog levels", model: "claude-opus-4-6", effort: "max", wantType: "adaptive", wantEffort: "max"},
+		{name: "none disables thinking", model: "claude-opus-4-6", effort: "none", wantType: "disabled", wantEffort: ""},
+		{name: "auto omits thinking entirely", model: "claude-opus-4-6", effort: "auto", wantType: "", wantEffort: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			out, err := ConvertOpenAIResponsesRequestToClaude(test.model, []byte(`{"reasoning":{"effort":"`+test.effort+`"},"input":"hi"}`), false)
+			if err != nil {
+				t.Fatalf("convert error: %v", err)
+			}
+			if got := gjson.GetBytes(out, "thinking.type").String(); got != test.wantType {
+				t.Fatalf("thinking.type = %q, want %q; body=%s", got, test.wantType, out)
+			}
+			if got := gjson.GetBytes(out, "output_config.effort").String(); got != test.wantEffort {
+				t.Fatalf("output_config.effort = %q, want %q; body=%s", got, test.wantEffort, out)
+			}
+			if gjson.GetBytes(out, "thinking.budget_tokens").Exists() {
+				t.Fatalf("thinking.budget_tokens must not be derived from effort; body=%s", out)
+			}
+		})
+	}
+}
