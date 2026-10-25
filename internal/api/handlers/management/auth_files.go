@@ -784,6 +784,29 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quota authFileQu
 	if requestRetry, ok := auth.RequestRetryOverride(); ok {
 		entry["request_retry"] = requestRetry
 	}
+	if pt := strings.TrimSpace(authAttribute(auth, "plan_type")); pt != "" {
+		entry["plan_type"] = pt
+	} else if auth.Metadata != nil {
+		if ptRaw, ok := auth.Metadata["plan_type"].(string); ok && strings.TrimSpace(ptRaw) != "" {
+			entry["plan_type"] = strings.TrimSpace(ptRaw)
+		}
+	}
+	if entry["plan_type"] == nil || entry["plan_type"] == "" {
+		if claims, ok := entry["id_token"].(gin.H); ok {
+			if pt, okPt := claims["plan_type"].(string); okPt && strings.TrimSpace(pt) != "" {
+				entry["plan_type"] = strings.TrimSpace(pt)
+			}
+		}
+	}
+	if ar := strings.TrimSpace(authAttribute(auth, "active_resets")); ar != "" {
+		if count, err := strconv.Atoi(ar); err == nil {
+			entry["active_resets"] = count
+		}
+	} else if auth.Metadata != nil {
+		if arRaw, ok := auth.Metadata["active_resets"]; ok {
+			entry["active_resets"] = arRaw
+		}
+	}
 	if quota.v8 && strings.EqualFold(strings.TrimSpace(auth.Provider), "codex") {
 		entry["siwc_bind_supported"] = siwcBindEligible(auth)
 		entry["use_siwc"] = coreauth.IsCodexUseSIWC(auth)

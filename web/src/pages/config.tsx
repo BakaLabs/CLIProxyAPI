@@ -1,0 +1,994 @@
+import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { yaml as yamlLanguage } from "@codemirror/lang-yaml";
+import { oneDark } from "@codemirror/theme-one-dark";
+import CodeMirror from "@uiw/react-codemirror";
+import {
+  AlertTriangle,
+  Check,
+  Cpu,
+  Feather,
+  FileCode2,
+  Globe,
+  KeyRound,
+  Layers,
+  Loader2,
+  PanelsTopLeft,
+  Plus,
+  RotateCcw,
+  Route,
+  Server,
+  Settings2,
+  Terminal,
+  Trash2,
+  Zap,
+} from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PageHeader } from "@/components/shared/page-header";
+import { config } from "@/api/management";
+import { errMessage } from "@/api/types";
+import { cn } from "@/lib/utils";
+
+type Doc = Record<string, unknown>;
+
+const SECTION_ICONS: Record<string, typeof Settings2> = {
+  routing: Route,
+  requests: Globe,
+  upstream: Zap,
+  client: Cpu,
+  server: Server,
+  management: Settings2,
+  access: KeyRound,
+  models: Layers,
+};
+
+const SECTION_LABELS: Record<string, string> = {
+  routing: "路由与亲和性 (Routing)",
+  requests: "网络与代理 (Requests)",
+  upstream: "上游引擎策略 (Upstream)",
+  client: "客户端兼容性 (Client)",
+  server: "服务器与安全 (Server)",
+  management: "管理端配置 (Management)",
+  access: "客户端访问密钥 (Access Keys)",
+  models: "模型目录源 (Catalogs)",
+};
+
+export function ConfigPage() {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const doc = useQuery({ queryKey: ["config-doc"], queryFn: () => config.get<Doc>() });
+
+  const [tab, setTab] = useState("visual");
+  const [activeSection, setActiveSection] = useState("routing");
+  const [drafts, setDrafts] = useState<Record<string, Doc>>({});
+  const [yamlDraft, setYamlDraft] = useState<string | null>(null);
+
+  const sections = useMemo(() => {
+    const rawKeys = Object.keys(doc.data?.config ?? {});
+    const priority = ["routing", "requests", "upstream", "client", "server", "management", "access", "models"];
+    const ordered = [...priority.filter((k) => rawKeys.includes(k)), ...rawKeys.filter((k) => !priority.includes(k) && k !== "config-version")];
+    return ordered;
+  }, [doc.data]);
+
+  useEffect(() => {
+    if ((!activeSection || !sections.includes(activeSection)) && sections.length > 0) {
+      setActiveSection(sections[0] ?? "routing");
+    }
+  }, [sections, activeSection]);
+
+  const dirtySections = Object.keys(drafts);
+
+  const saveSection = useMutation({
+    mutationFn: async (name: string) => {
+      const etag = doc.data?.etag ?? "";
+      try {
+        await config.patchPath(name, drafts[name], etag);
+        return true;
+      } catch (error) {
+        if (errMessage(error).includes("precondition_failed")) {
+          toast.error(t("config.conflict"));
+          await queryClient.invalidateQueries({ queryKey: ["config-doc"] });
+          return false;
+        }
+        throw error;
+      }
+    },
+    onSuccess: (ok, name) => {
+      if (ok) {
+        toast.success(t("common.saved"));
+        setDrafts((current) => {
+          const next = { ...current };
+          delete next[name];
+          return next;
+        });
+        void queryClient.invalidateQueries({ queryKey: ["config-doc"] });
+      }
+    },
+    onError: (error) => toast.error(errMessage(error)),
+  });
+
+  const saveAll = async () => {
+    for (const name of dirtySections) {
+      const ok = await saveSection.mutateAsync(name);
+      if (!ok) return;
+    }
+  };
+
+  const yaml = useQuery({
+    queryKey: ["config-yaml"],
+    queryFn: () => config.getYAML(),
+    enabled: tab === "yaml",
+  });
+  useEffect(() => {
+    if (yaml.data && yamlDraft === null) setYamlDraft(yaml.data.yaml);
+  }, [yaml.data]);
+
+  const saveYaml = useMutation({
+    mutationFn: async () => {
+      await config.putYAML(yamlDraft ?? "", yaml.data?.etag ?? "");
+    },
+    onSuccess: () => {
+      toast.success(t("common.saved"));
+      setYamlDraft(null);
+      void queryClient.invalidateQueries({ queryKey: ["config-doc"] });
+      void queryClient.invalidateQueries({ queryKey: ["config-yaml"] });
+    },
+    onError: (error) => {
+      if (errMessage(error).includes("precondition_failed")) {
+        toast.error(t("config.conflict"));
+      } else {
+        toast.error(errMessage(error));
+      }
+      void queryClient.invalidateQueries({ queryKey: ["config-yaml"] });
+    },
+  });
+
+  const setSectionDraft = (name: string, value: Doc) => {
+    setDrafts((current) => {
+      const next = { ...current };
+      const originalValue = (doc.data?.config ?? {})[name] ?? {};
+      if (JSON.stringify(value) === JSON.stringify(originalValue)) {
+        delete next[name];
+      } else {
+        next[name] = value;
+      }
+      return next;
+    });
+  };
+
+  return (
+    <>
+      <PageHeader title={t("nav.config")} subtitle={t("config.subtitle")}>
+        {tab === "visual" ? (
+          <>
+            {dirtySections.length > 0 ? (
+              <>
+                <span className="text-xs text-amber-500 font-medium">
+                  <AlertTriangle className="mr-1 inline size-3.5" />
+                  {t("config.dirtyCount", { count: dirtySections.length })}
+                </span>
+                <Button variant="outline" size="sm" className="h-8 rounded-xl text-xs" onClick={() => setDrafts({})}>
+                  <RotateCcw className="size-3.5" />
+                  <span>{t("config.discard")}</span>
+                </Button>
+                <Button size="sm" className="h-8 gap-1.5 rounded-xl bg-blue-600 text-white shadow-xs text-xs hover:bg-blue-700" onClick={() => void saveAll()} disabled={saveSection.isPending}>
+                  {saveSection.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+                  <span>{t("config.saveAll")}</span>
+                </Button>
+              </>
+            ) : null}
+          </>
+        ) : (
+          <>
+            {yamlDraft !== null && yamlDraft !== yaml.data?.yaml ? <span className="text-xs text-amber-500">{t("config.dirty")}</span> : null}
+            <Button variant="outline" size="sm" className="h-8 rounded-xl text-xs" onClick={() => setYamlDraft(yaml.data?.yaml ?? "")} disabled={yamlDraft === yaml.data?.yaml}>
+              <RotateCcw className="size-3.5" />
+              <span>{t("config.discard")}</span>
+            </Button>
+            <Button size="sm" className="h-8 gap-1.5 rounded-xl bg-blue-600 text-white shadow-xs text-xs hover:bg-blue-700" onClick={() => saveYaml.mutate()} disabled={yamlDraft === null || yamlDraft === yaml.data?.yaml || saveYaml.isPending}>
+              {saveYaml.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+              <span>{t("common.save")}</span>
+            </Button>
+          </>
+        )}
+      </PageHeader>
+
+      {doc.isLoading ? (
+        <div className="flex flex-col items-center justify-center py-20">
+          <Loader2 className="size-8 animate-spin text-blue-500" />
+          <p className="mt-2 text-xs text-slate-500">{t("common.loading")}</p>
+        </div>
+      ) : doc.error ? (
+        <p className="text-destructive py-12 text-center text-sm">{errMessage(doc.error)}</p>
+      ) : (
+        <Tabs value={tab} onValueChange={setTab}>
+          <div className="flex items-center justify-between mb-3">
+            <TabsList className="rounded-xl p-1 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
+              <TabsTrigger value="visual" className="rounded-lg text-xs gap-1.5 data-[state=active]:bg-blue-600 data-[state=active]:text-white">
+                <PanelsTopLeft className="size-3.5" />
+                <span>可视化配置</span>
+              </TabsTrigger>
+              <TabsTrigger value="yaml" className="rounded-lg text-xs gap-1.5 data-[state=active]:bg-blue-600 data-[state=active]:text-white">
+                <FileCode2 className="size-3.5" />
+                <span>YAML 源码</span>
+              </TabsTrigger>
+            </TabsList>
+
+            {tab === "visual" && dirtySections.includes(activeSection) && (
+              <Button
+                size="sm"
+                className="h-8 gap-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs"
+                onClick={() => saveSection.mutate(activeSection)}
+                disabled={saveSection.isPending}
+              >
+                {saveSection.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+                <span>保存此分区修改</span>
+              </Button>
+            )}
+          </div>
+
+          {/* Visual Mode */}
+          <TabsContent value="visual" className="mt-0">
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-[17rem_1fr]">
+              {/* Left Navigation Pills */}
+              <div className="space-y-1">
+                {sections.map((name) => {
+                  const Icon = SECTION_ICONS[name] ?? Settings2;
+                  const label = SECTION_LABELS[name] ?? name;
+                  const isDirty = dirtySections.includes(name);
+                  const isSelected = activeSection === name;
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => setActiveSection(name)}
+                      className={cn(
+                        "flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-xs font-medium transition-all duration-150 shadow-2xs",
+                        isSelected
+                          ? "bg-blue-600 text-white shadow-xs font-semibold"
+                          : "bg-white/80 text-slate-700 hover:bg-white hover:text-slate-900 dark:bg-slate-900/80 dark:text-slate-300 dark:hover:bg-slate-800",
+                      )}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Icon className={cn("size-4 shrink-0", isSelected ? "text-white" : "text-blue-500")} />
+                        <span className="truncate">{label}</span>
+                      </div>
+                      {isDirty && (
+                        <span className="size-2 rounded-full bg-amber-400 shrink-0" title="有未保存修改" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Right Configuration Form */}
+              <div className="card-surface p-5 min-h-[480px]">
+                {activeSection && doc.data ? (
+                  <ConfigSectionEditor
+                    name={activeSection}
+                    original={(doc.data.config[activeSection] ?? {}) as Doc}
+                    draft={drafts[activeSection]}
+                    onChange={(next) => setSectionDraft(activeSection, next)}
+                  />
+                ) : null}
+              </div>
+            </div>
+          </TabsContent>
+
+          {/* Raw YAML Mode */}
+          <TabsContent value="yaml" className="mt-0">
+            {yaml.isLoading || !yaml.data ? (
+              <p className="text-muted-foreground py-12 text-center text-sm">{t("common.loading")}</p>
+            ) : (
+              <div className="card-surface overflow-hidden p-3">
+                <CodeMirror
+                  value={yamlDraft ?? yaml.data.yaml}
+                  height="75vh"
+                  theme={oneDark}
+                  extensions={[yamlLanguage()]}
+                  basicSetup={{ foldGutter: true, highlightActiveLine: true, lineNumbers: true }}
+                  onChange={(value) => setYamlDraft(value)}
+                  className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-mono"
+                />
+                <p className="text-muted-foreground mt-2 px-1 text-xs">{t("config.yamlHint")}</p>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- Section Editor
+
+function ConfigSectionEditor({
+  name,
+  original,
+  draft,
+  onChange,
+}: {
+  name: string;
+  original: Doc;
+  draft: Doc | undefined;
+  onChange: (value: Doc) => void;
+}) {
+  const current = draft ?? original;
+  const [mode, setMode] = useState<"form" | "raw">("form");
+  const [rawText, setRawText] = useState("");
+
+  const update = (changes: Partial<Doc>) => {
+    onChange({ ...current, ...changes });
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-slate-800">
+        <div>
+          <h3 className="font-semibold text-sm text-slate-900 dark:text-slate-100">
+            {SECTION_LABELS[name] ?? name}
+          </h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            配置修改保存后将在网关下次热重载时即时生效。
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs rounded-lg"
+          onClick={() => {
+            if (mode === "form") setRawText(JSON.stringify(current, null, 2));
+            setMode(mode === "form" ? "raw" : "form");
+          }}
+        >
+          {mode === "form" ? <FileCode2 className="size-3.5 mr-1" /> : <PanelsTopLeft className="size-3.5 mr-1" />}
+          <span>{mode === "form" ? "JSON 专家模式" : "返回图形表单"}</span>
+        </Button>
+      </div>
+
+      {mode === "raw" ? (
+        <div className="space-y-2">
+          <textarea
+            className="h-96 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-xs dark:border-slate-800 dark:bg-slate-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            value={rawText}
+            onChange={(e) => setRawText(e.target.value)}
+            spellCheck={false}
+          />
+          <Button
+            size="sm"
+            className="h-8 rounded-xl bg-blue-600 text-white text-xs"
+            onClick={() => {
+              try {
+                const parsed = JSON.parse(rawText) as Doc;
+                onChange(parsed);
+                toast.success("已应用 JSON 修改");
+              } catch (e) {
+                toast.error("JSON 格式错误: " + String(e));
+              }
+            }}
+          >
+            应用此 JSON 内容
+          </Button>
+        </div>
+      ) : name === "routing" ? (
+        <RoutingForm current={current} update={update} />
+      ) : name === "requests" ? (
+        <RequestsForm current={current} update={update} />
+      ) : name === "upstream" ? (
+        <UpstreamForm current={current} update={update} />
+      ) : name === "client" ? (
+        <ClientForm current={current} update={update} />
+      ) : name === "server" ? (
+        <ServerForm current={current} update={update} />
+      ) : name === "management" ? (
+        <ManagementForm current={current} update={update} />
+      ) : name === "access" ? (
+        <AccessForm current={current} update={update} />
+      ) : name === "models" ? (
+        <ModelsForm current={current} update={update} />
+      ) : (
+        <GenericForm current={current} update={update} />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Dedicated Forms
+
+function RoutingForm({ current, update }: { current: Doc; update: (changes: Partial<Doc>) => void }) {
+  const strategy = String(current.strategy || "round-robin");
+  const sessionAffinity = Boolean(current["session-affinity"]);
+  const sessionAffinityTTL = String(current["session-affinity-ttl"] || "1h");
+  const sessionAffinitySubagents = current["session-affinity-subagents"] !== false;
+  const sessionAffinityRebindOn = String(current["session-affinity-rebind-on"] || "any");
+  const forceModelPrefix = Boolean(current["force-model-prefix"]);
+
+  const retry = (current.retry as Doc | undefined) ?? {};
+  const cooldown = (current.cooldown as Doc | undefined) ?? {};
+
+  return (
+    <div className="space-y-6">
+      {/* Strategy and Affinity */}
+      <div className="space-y-4">
+        <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">调度算法与亲和策略</h4>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label className="text-xs">负载均衡算法 (Strategy)</Label>
+            <Select value={strategy} onValueChange={(val) => update({ strategy: val })}>
+              <SelectTrigger className="h-9 rounded-xl text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl">
+                <SelectItem value="round-robin">Round Robin (轮询负载均衡)</SelectItem>
+                <SelectItem value="weighted-round-robin">Weighted Round Robin (按权重加权轮询)</SelectItem>
+                <SelectItem value="fill-first">Fill First (单凭据优先填满)</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-slate-400">选择调度凭据时的分发策略。</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">会话保持时长 (Affinity TTL)</Label>
+            <Input
+              className="h-9 rounded-xl text-xs font-mono"
+              value={sessionAffinityTTL}
+              onChange={(e) => update({ "session-affinity-ttl": e.target.value })}
+              placeholder="1h"
+            />
+            <p className="text-[11px] text-slate-400">同一个客户端会话与特定上游凭据绑定的保留时间（如 1h, 30m）。</p>
+          </div>
+
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label className="text-xs">故障重绑时机 (Affinity Rebind On)</Label>
+            <Select value={sessionAffinityRebindOn} onValueChange={(val) => update({ "session-affinity-rebind-on": val })}>
+              <SelectTrigger className="h-9 rounded-xl text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl">
+                <SelectItem value="any">Any (任何凭据错误均解除绑定并重试新凭据)</SelectItem>
+                <SelectItem value="quota">Quota (仅在限额或鉴权错误时重绑，瞬态网络错误保留绑定)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="space-y-2 rounded-xl border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+          <SwitchRow
+            label="通用会话保持 (Session Affinity)"
+            hint="根据 Claude Code / Codex / Responses 会话 ID 或提示词缓存键绑定单一凭据，大幅提升缓存命中率。"
+            checked={sessionAffinity}
+            onCheckedChange={(checked) => update({ "session-affinity": checked })}
+          />
+          <SwitchRow
+            label="子智能体继承父会话 (Affinity Subagents)"
+            hint="Subagent 任务自动继承父会话绑定的凭据，实现全局跨轮次 Prompt Cache 复用。"
+            checked={sessionAffinitySubagents}
+            onCheckedChange={(checked) => update({ "session-affinity-subagents": checked })}
+          />
+          <SwitchRow
+            label="强制模型前缀匹配 (Force Model Prefix)"
+            hint="未指定前缀的模型请求仅路由给无前缀的凭据。"
+            checked={forceModelPrefix}
+            onCheckedChange={(checked) => update({ "force-model-prefix": checked })}
+          />
+        </div>
+      </div>
+
+      {/* Retries and Cooldowns */}
+      <div className="space-y-4">
+        <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">故障重试与冷却黑名单</h4>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs">额外重试轮次 (request-retry)</Label>
+            <Input
+              type="number"
+              className="h-9 rounded-xl text-xs font-mono"
+              value={retry["request-retry"] !== undefined ? String(retry["request-retry"]) : "3"}
+              onChange={(e) => update({ retry: { ...retry, "request-retry": Number(e.target.value) } })}
+            />
+            <p className="text-[11px] text-slate-400">遇到 429/5xx 错误时尝试换凭据的轮次。</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">最大冷却等待秒数 (max-retry-interval)</Label>
+            <Input
+              type="number"
+              className="h-9 rounded-xl text-xs font-mono"
+              value={retry["max-retry-interval"] !== undefined ? String(retry["max-retry-interval"]) : "30"}
+              onChange={(e) => update({ retry: { ...retry, "max-retry-interval": Number(e.target.value) } })}
+            />
+            <p className="text-[11px] text-slate-400">重试轮次间允许等待的最长冷却时间（秒）。</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">瞬态错误冷却秒数 (transient-cooldown)</Label>
+            <Input
+              type="number"
+              className="h-9 rounded-xl text-xs font-mono"
+              value={cooldown["transient-error-cooldown-seconds"] !== undefined ? String(cooldown["transient-error-cooldown-seconds"]) : "0"}
+              onChange={(e) => update({ cooldown: { ...cooldown, "transient-error-cooldown-seconds": Number(e.target.value) } })}
+            />
+            <p className="text-[11px] text-slate-400">0 为默认 60s 冷却，-1 为禁用瞬态错误冷却。</p>
+          </div>
+        </div>
+
+        <div className="space-y-2 rounded-xl border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+          <SwitchRow
+            label="全局禁用冷却黑名单 (Disable Cooling)"
+            hint="若开启，凭据遇到限流或错误后不会被暂时隔离冷却。"
+            checked={Boolean(cooldown["disable-cooling"])}
+            onCheckedChange={(checked) => update({ cooldown: { ...cooldown, "disable-cooling": checked } })}
+          />
+          <SwitchRow
+            label="持久化保存冷却状态 (Save Cooldown Status)"
+            hint="将冷却状态作为 .cds 文件存储，网关重启后保持凭据的冷却黑名单状态。"
+            checked={Boolean(cooldown["save-cooldown-status"])}
+            onCheckedChange={(checked) => update({ cooldown: { ...cooldown, "save-cooldown-status": checked } })}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RequestsForm({ current, update }: { current: Doc; update: (changes: Partial<Doc>) => void }) {
+  const proxyURL = String(current["proxy-url"] || "");
+  const tlsHandshakeTimeout = Number(current["tls-handshake-timeout-seconds"] || 0);
+  const passthroughHeaders = Boolean(current["passthrough-headers"]);
+  const nonstreamKeepalive = Number(current["nonstream-keepalive-interval"] || 0);
+  const streaming = (current.streaming as Doc | undefined) ?? {};
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="space-y-1.5 sm:col-span-2">
+          <Label className="text-xs">全局上游网络代理 (Proxy URL)</Label>
+          <Input
+            className="h-9 rounded-xl text-xs font-mono"
+            value={proxyURL}
+            onChange={(e) => update({ "proxy-url": e.target.value })}
+            placeholder="socks5://127.0.0.1:1080 或 http://proxy.corp:8080"
+          />
+          <p className="text-[11px] text-slate-400">支持 socks5://, http://, https://，留空使用系统网络直连。</p>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs">TLS 握手超时秒数 (TLS Handshake Timeout)</Label>
+          <Input
+            type="number"
+            className="h-9 rounded-xl text-xs font-mono"
+            value={tlsHandshakeTimeout ? String(tlsHandshakeTimeout) : ""}
+            onChange={(e) => update({ "tls-handshake-timeout-seconds": Number(e.target.value) })}
+            placeholder="0 (禁用超时限制)"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs">非流式保活空行间隔秒数</Label>
+          <Input
+            type="number"
+            className="h-9 rounded-xl text-xs font-mono"
+            value={nonstreamKeepalive ? String(nonstreamKeepalive) : ""}
+            onChange={(e) => update({ "nonstream-keepalive-interval": Number(e.target.value) })}
+            placeholder="0 (禁用)"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2 rounded-xl border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+        <SwitchRow
+          label="透传上游响应头 (Passthrough Headers)"
+          hint="将上游过滤后的响应头如 ratelimit 信息完整透传给下游客户端。"
+          checked={passthroughHeaders}
+          onCheckedChange={(checked) => update({ "passthrough-headers": checked })}
+        />
+        <SwitchRow
+          label="流式 SSE 保活心跳 (SSE Keep-Alive)"
+          hint="针对长时间推理思考的流式请求，定期发送心跳包防止反向代理和网关断连。"
+          checked={Boolean(streaming["keepalive-seconds"])}
+          onCheckedChange={(checked) => update({ streaming: { ...streaming, "keepalive-seconds": checked ? 15 : 0 } })}
+        />
+      </div>
+    </div>
+  );
+}
+
+function UpstreamForm({ current, update }: { current: Doc; update: (changes: Partial<Doc>) => void }) {
+  const codex = (current.codex as Doc | undefined) ?? {};
+  const claude = (current.claude as Doc | undefined) ?? {};
+  const xai = (current.xai as Doc | undefined) ?? {};
+
+  return (
+    <div className="space-y-6">
+      {/* Codex Upstream */}
+      <div className="space-y-3">
+        <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+          <Terminal className="size-3.5 text-blue-500" />
+          <span>Codex / ChatGPT 上游调优</span>
+        </h4>
+        <div className="space-y-2 rounded-xl border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+          <SwitchRow
+            label="Codex 响应转向 (Response Steering)"
+            hint="全双工 WebSocket Steering，同账号同模型维护持久连接。"
+            checked={Boolean(codex["response-steering"])}
+            onCheckedChange={(checked) => update({ codex: { ...codex, "response-steering": checked } })}
+          />
+          <SwitchRow
+            label="Codex 首包缓冲换号 (Stream Bootstrap Buffering)"
+            hint="在向客户端提交 HTTP 头部前缓冲 early handshake，遇限流时无缝换凭据重试。"
+            checked={Boolean(codex["stream-bootstrap-buffering"])}
+            onCheckedChange={(checked) => update({ codex: { ...codex, "stream-bootstrap-buffering": checked } })}
+          />
+          <SwitchRow
+            label="模型级隔离冷却 (Model-level Cooling)"
+            hint="单个模型达到额度上限时仅冷却该模型，不影响该凭据上的其他模型。"
+            checked={Boolean(codex["model-level-cooling"])}
+            onCheckedChange={(checked) => update({ codex: { ...codex, "model-level-cooling": checked } })}
+          />
+          <SwitchRow
+            label="禁用 Codex 伪装头 (Disable Codex Cloaking)"
+            hint="停用强制附加的官方 Codex User-Agent 和 Originator 请求头。"
+            checked={Boolean(codex["disable-codex-cloaking"])}
+            onCheckedChange={(checked) => update({ codex: { ...codex, "disable-codex-cloaking": checked } })}
+          />
+        </div>
+      </div>
+
+      {/* Claude Upstream */}
+      <div className="space-y-3">
+        <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+          <Feather className="size-3.5 text-amber-500" />
+          <span>Claude / Anthropic 上游调优</span>
+        </h4>
+        <div className="space-y-2 rounded-xl border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+          <SwitchRow
+            label="原生工具搜索 (Native Tool Search)"
+            hint="在 Claude Responses 路径启用原生工具延迟加载 (defer_loading)，保持缓存前缀稳定。"
+            checked={Boolean(claude["tool-search"])}
+            onCheckedChange={(checked) => update({ claude: { ...claude, "tool-search": checked } })}
+          />
+          <SwitchRow
+            label="模型级隔离冷却 (Model-level Cooling)"
+            hint="特定 Claude 模型遭遇冷却时不影响同一账户下其他模型。"
+            checked={Boolean(claude["model-level-cooling"])}
+            onCheckedChange={(checked) => update({ claude: { ...claude, "model-level-cooling": checked } })}
+          />
+          <SwitchRow
+            label="停用 Claude 客户端伪装 (Disable Claude Cloak Mode)"
+            hint="原始提示词透传，不替换 Claude Code 预置 system prompt。"
+            checked={Boolean(claude["disable-claude-cloak-mode"])}
+            onCheckedChange={(checked) => update({ claude: { ...claude, "disable-claude-cloak-mode": checked } })}
+          />
+        </div>
+      </div>
+
+      {/* xAI Upstream */}
+      <div className="space-y-3">
+        <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+          <Zap className="size-3.5 text-purple-500" />
+          <span>xAI / Grok 调优</span>
+        </h4>
+        <div className="space-y-2 rounded-xl border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+          <SwitchRow
+            label="自动注入 x_search 原生联网工具 (Inject x_search)"
+            hint="当请求未声明联网搜索时，自动附加 xAI 原生联网搜索工具。"
+            checked={Boolean(xai["inject-x-search"])}
+            onCheckedChange={(checked) => update({ xai: { ...xai, "inject-x-search": checked } })}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ClientForm({ current, update }: { current: Doc; update: (changes: Partial<Doc>) => void }) {
+  const codex = (current.codex as Doc | undefined) ?? {};
+  const webSearchCache = (codex["web-search-result-cache"] as Doc | undefined) ?? {};
+
+  return (
+    <div className="space-y-5">
+      <div className="space-y-2 rounded-xl border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+        <SwitchRow
+          label="启用 apply_patch 补丁兼容声明"
+          hint="让所有路由执行器所桥接的模型在客户端模型能力声明中广播 freeform 补丁能力。"
+          checked={Boolean(codex["enable-apply-patch"])}
+          onCheckedChange={(checked) => update({ codex: { ...codex, "enable-apply-patch": checked } })}
+        />
+        <SwitchRow
+          label="多智能体 v2 优化 (Optimize Multi-Agent v2)"
+          hint="为 Codex Desktop 和 codex-tui 优化 spawn_agent 交互，自动规范消息参数与格式转换。"
+          checked={Boolean(codex["optimize-multi-agent-v2"])}
+          onCheckedChange={(checked) => update({ codex: { ...codex, "optimize-multi-agent-v2": checked } })}
+        />
+        <SwitchRow
+          label="联网搜索结果会话缓存 (Web Search Result Cache)"
+          hint="在同一会话中缓存搜索结果，在重放对话历史时复用结果节省 Token。"
+          checked={Boolean(webSearchCache.enabled)}
+          onCheckedChange={(checked) =>
+            update({
+              codex: {
+                ...codex,
+                "web-search-result-cache": { ...webSearchCache, enabled: checked },
+              },
+            })
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
+function ServerForm({ current, update }: { current: Doc; update: (changes: Partial<Doc>) => void }) {
+  const host = String(current.host || "");
+  const port = Number(current.port || 8317);
+  const maxRequestBodyBytes = Number(current["max-request-body-bytes"] || 0);
+  const commercialMode = Boolean(current["commercial-mode"]);
+  const githubToken = String(current["github-token"] || "");
+  const discovery = (current.discovery as Doc | undefined) ?? {};
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label className="text-xs">监听地址 (Host)</Label>
+          <Input
+            className="h-9 rounded-xl text-xs font-mono"
+            value={host}
+            onChange={(e) => update({ host: e.target.value })}
+            placeholder="留空监听全部网卡 (0.0.0.0)"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs">监听端口 (Port)</Label>
+          <Input
+            type="number"
+            className="h-9 rounded-xl text-xs font-mono"
+            value={port ? String(port) : ""}
+            onChange={(e) => update({ port: Number(e.target.value) })}
+            placeholder="8317"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs">最大请求体字节 (Max Request Body Bytes)</Label>
+          <Input
+            type="number"
+            className="h-9 rounded-xl text-xs font-mono"
+            value={maxRequestBodyBytes ? String(maxRequestBodyBytes) : ""}
+            onChange={(e) => update({ "max-request-body-bytes": Number(e.target.value) })}
+            placeholder="0 (不限制)"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs">GitHub Token (发布检查与下载)</Label>
+          <Input
+            type="password"
+            className="h-9 rounded-xl text-xs font-mono"
+            value={githubToken}
+            onChange={(e) => update({ "github-token": e.target.value })}
+            placeholder="ghp_..."
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2 rounded-xl border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+        <SwitchRow
+          label="商用轻量模式 (Commercial Mode)"
+          hint="在高并发场景下停用内存消耗较大的中间件以提升极端吞吐表现。"
+          checked={commercialMode}
+          onCheckedChange={(checked) => update({ "commercial-mode": checked })}
+        />
+        <SwitchRow
+          label="局域网 mDNS 服务发现 (mDNS Discovery)"
+          hint="在局域网内广播 _ai-gateway._tcp 服务，方便客户端工具自动定位。"
+          checked={Boolean(discovery.enabled)}
+          onCheckedChange={(checked) => update({ discovery: { ...discovery, enabled: checked } })}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ManagementForm({ current, update }: { current: Doc; update: (changes: Partial<Doc>) => void }) {
+  const allowRemote = Boolean(current["allow-remote"]);
+  const secretKey = String(current["secret-key"] || "");
+  const disableControlPanel = Boolean(current["disable-control-panel"]);
+
+  return (
+    <div className="space-y-5">
+      <div className="space-y-1.5">
+        <Label className="text-xs">管理端通信密钥 (Secret Key)</Label>
+        <Input
+          type="password"
+          className="h-9 rounded-xl text-xs font-mono"
+          value={secretKey}
+          onChange={(e) => update({ "secret-key": e.target.value })}
+          placeholder="留空即禁用管理 API；启动时自动哈希"
+        />
+        <p className="text-[11px] text-slate-400">所有访问 /v8/management 路由的请求均需要此密钥授权。</p>
+      </div>
+
+      <div className="space-y-2 rounded-xl border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+        <SwitchRow
+          label="允许远程管理访问 (Allow Remote)"
+          hint="开启后允许非 localhost 机器通过密码访问管理界面与接口。"
+          checked={allowRemote}
+          onCheckedChange={(checked) => update({ "allow-remote": checked })}
+        />
+        <SwitchRow
+          label="关闭内置管理面板网页 (Disable Control Panel)"
+          hint="开启后禁用内置静态面板，仅保留纯接口功能。"
+          checked={disableControlPanel}
+          onCheckedChange={(checked) => update({ "disable-control-panel": checked })}
+        />
+      </div>
+    </div>
+  );
+}
+
+function AccessForm({ current, update }: { current: Doc; update: (changes: Partial<Doc>) => void }) {
+  const keys = Array.isArray(current["api-keys"]) ? (current["api-keys"] as string[]) : [];
+
+  const setKeys = (next: string[]) => {
+    update({ "api-keys": next });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300">客户端访问 API Keys 列表</h4>
+          <p className="text-[11px] text-slate-400">下游客户端调用 /v1/chat/completions 等代理接口时使用的身份凭据。</p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs rounded-lg gap-1"
+          onClick={() => setKeys([...keys, "sk-" + Math.random().toString(36).slice(2, 12)])}
+        >
+          <Plus className="size-3.5" />
+          <span>添加 API Key</span>
+        </Button>
+      </div>
+
+      {keys.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400 dark:border-slate-800">
+          未配置客户端访问密钥（允许任意客户端免密调用代理）
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          {keys.map((key, index) => (
+            <div key={index} className="flex items-center gap-2 rounded-xl border border-slate-200/80 bg-slate-50/70 p-2 dark:border-slate-800 dark:bg-slate-900/70">
+              <span className="text-slate-400 font-mono text-xs w-6 text-center">{index + 1}</span>
+              <Input
+                className="h-8 flex-1 font-mono text-xs rounded-lg bg-white dark:bg-slate-950"
+                value={key}
+                onChange={(e) => {
+                  const next = [...keys];
+                  next[index] = e.target.value;
+                  setKeys(next);
+                }}
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 text-rose-500 hover:text-rose-600 rounded-lg"
+                onClick={() => setKeys(keys.filter((_, i) => i !== index))}
+                title="删除"
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ModelsForm({ current, update }: { current: Doc; update: (changes: Partial<Doc>) => void }) {
+  const catalog = String(current.catalog || "");
+  const codexCatalog = String(current["codex-catalog"] || "");
+  const devinCatalog = String(current["devin-catalog"] || "");
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1.5">
+        <Label className="text-xs">通用模型目录源 URL 或本地路径</Label>
+        <Input
+          className="h-9 rounded-xl text-xs font-mono"
+          value={catalog}
+          onChange={(e) => update({ catalog: e.target.value })}
+          placeholder="https://... 或 /path/to/catalog.json"
+        />
+        <p className="text-[11px] text-slate-400">留空则自动使用官方远程源或内置目录，每 3 小时自动刷新。</p>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs">Codex 专属目录源</Label>
+        <Input
+          className="h-9 rounded-xl text-xs font-mono"
+          value={codexCatalog}
+          onChange={(e) => update({ "codex-catalog": e.target.value })}
+          placeholder="https://... 或 /path/to/codex-catalog.json"
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs">Devin 目录源</Label>
+        <Input
+          className="h-9 rounded-xl text-xs font-mono"
+          value={devinCatalog}
+          onChange={(e) => update({ "devin-catalog": e.target.value })}
+          placeholder="https://... 或 /path/to/devin-catalog.json"
+        />
+      </div>
+    </div>
+  );
+}
+
+function GenericForm({ current, update }: { current: Doc; update: (changes: Partial<Doc>) => void }) {
+  return (
+    <div className="space-y-3">
+      {Object.entries(current).map(([key, val]) => (
+        <div key={key} className="flex items-center justify-between gap-4 py-2 border-b border-slate-100 last:border-0 dark:border-slate-800">
+          <span className="font-mono text-xs text-slate-700 dark:text-slate-300">{key}</span>
+          {typeof val === "boolean" ? (
+            <Switch checked={val} onCheckedChange={(checked) => update({ [key]: checked })} />
+          ) : (
+            <Input
+              className="h-8 w-64 text-xs font-mono rounded-lg"
+              value={typeof val === "object" ? JSON.stringify(val) : String(val ?? "")}
+              onChange={(e) => {
+                let parsed: unknown = e.target.value;
+                try {
+                  parsed = JSON.parse(e.target.value);
+                } catch {
+                  // Fall back to plain string when JSON parsing fails
+                }
+                update({ [key]: parsed });
+              }}
+            />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SwitchRow({
+  label,
+  hint,
+  checked,
+  onCheckedChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-2 last:border-0">
+      <div className="min-w-0 pr-2">
+        <p className="text-xs font-medium text-slate-800 dark:text-slate-200">{label}</p>
+        {hint && <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">{hint}</p>}
+      </div>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
+  );
+}

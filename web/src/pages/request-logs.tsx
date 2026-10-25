@@ -1,0 +1,603 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
+import { ChevronUp, Download, EyeOff, Eye, Loader2, PauseCircle, PlayCircle, RadioTower, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Command, CommandItem, CommandList } from "@/components/ui/command";
+import { Input } from "@/components/ui/input";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/shared/page-header";
+import { CopyButton, DetailList, JsonView, StatusPill } from "@/components/shared/misc";
+import { RequestDBDisabled } from "@/components/shared/misc";
+import { TimeRangeSelect } from "@/components/shared/time-range-select";
+import { requestDB, fileLogs, type RecordFilter } from "@/api/management";
+import { errMessage, errStatus, type RequestRecord } from "@/api/types";
+import { useLiveRecords } from "@/hooks/use-live-records";
+import { computeCacheHitRate, computeTPS, dayjs, downloadText, formatDuration, formatInt, formatLatencySeconds, formatNumber, formatTPS, formatTime, getLatencyColorClass, getTTFTColorClass, maskKey, toCSV } from "@/lib/format";
+import { usePrefsStore, resolveRange, type TimeRange } from "@/stores/prefs";
+
+interface Filters {
+  model: string;
+  provider: string;
+  apiKey: string;
+  sessionId: string;
+  requestId: string;
+  traceId: string;
+  statusCode: string;
+  onlyFailed: boolean;
+}
+
+const EMPTY_FILTERS: Filters = { model: "", provider: "", apiKey: "", sessionId: "", requestId: "", traceId: "", statusCode: "", onlyFailed: false };
+
+function toRecordFilter(filters: Filters, range: TimeRange): RecordFilter {
+  const result: RecordFilter = {};
+  if (filters.model) result.model = filters.model;
+  if (filters.provider) result.provider = filters.provider;
+  if (filters.apiKey) result.api_key = filters.apiKey;
+  if (filters.sessionId) result.session_id = filters.sessionId;
+  if (filters.requestId) result.request_id = filters.requestId;
+  if (filters.traceId) result.trace_id = filters.traceId;
+  if (filters.statusCode) result.status_code = Number(filters.statusCode);
+  if (filters.onlyFailed) result.failed = true;
+
+  const resolved = resolveRange(range);
+  result.from = resolved.from;
+  if (range.preset === "custom") {
+    result.to = resolved.to;
+  }
+  return result;
+}
+
+function ModelChainDisplay({ record }: { record: RequestRecord }) {
+  const requested = record.alias?.trim() || record.model?.trim() || "—";
+  const sent = record.model?.trim() || "";
+  const response = record.response_model?.trim() || "";
+
+  const hasAliasDiff = Boolean(record.alias?.trim() && record.alias.trim() !== sent);
+  const hasResponseDiff = Boolean(response && response !== sent && response !== requested);
+
+  if (!hasAliasDiff && !hasResponseDiff) {
+    return (
+      <span className="font-mono text-xs text-foreground truncate" title={sent || "—"}>
+        {sent || "—"}
+      </span>
+    );
+  }
+
+  const tooltipLines = [
+    `Requested: ${requested}`,
+    sent && sent !== requested ? `Sent upstream: ${sent}` : null,
+    response && response !== sent ? `Upstream response: ${response}` : null,
+  ].filter(Boolean).join("\n");
+
+  return (
+    <div className="flex items-center gap-1 font-mono text-xs max-w-64 truncate" title={tooltipLines}>
+      <span className="truncate">{requested}</span>
+      {hasAliasDiff && sent ? (
+        <>
+          <span className="text-muted-foreground/60 shrink-0">→</span>
+          <span className="text-muted-foreground truncate">{sent}</span>
+        </>
+      ) : null}
+      {hasResponseDiff ? (
+        <>
+          <span className="text-amber-500 dark:text-amber-400 shrink-0">→</span>
+          <span className="text-amber-600 dark:text-amber-400 font-medium truncate">{response}</span>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function TokenMetricCell({ record }: { record: RequestRecord }) {
+  const cachePct = computeCacheHitRate(record);
+  const title = `Input: ${formatInt(record.input_tokens)} | Output: ${formatInt(record.output_tokens)} | Thinking: ${formatInt(record.reasoning_tokens)} | Cache: ${cachePct}`;
+
+  return (
+    <div className="flex items-center justify-end gap-1 font-mono text-xs" title={title}>
+      <span className="text-sky-500" title="Input">{formatNumber(record.input_tokens)}</span>
+      <span className="text-muted-foreground/40">/</span>
+      <span className="text-emerald-500" title="Output">{formatNumber(record.output_tokens)}</span>
+      <span className="text-muted-foreground/40">/</span>
+      <span className="text-orange-500 dark:text-orange-400 font-medium" title="Thinking">{formatNumber(record.reasoning_tokens)}</span>
+      <span className="text-muted-foreground/60 ml-1">·</span>
+      <span className="text-foreground" title="Cache hit rate">{cachePct}</span>
+    </div>
+  );
+}
+
+export function RequestLogsPage() {
+  const { t } = useTranslation();
+  const [range, setRange] = useState<TimeRange>({ preset: usePrefsStore.getState().defaultRange });
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [selected, setSelected] = useState<RequestRecord | null>(null);
+
+  const filter = useMemo(() => toRecordFilter(filters, range), [filters, range]);
+  const liveState = useLiveRecords(filter);
+  const maskKeys = usePrefsStore((state) => state.maskApiKeys);
+  const setMaskKeys = usePrefsStore((state) => state.setMaskApiKeys);
+
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const oldestID = liveState.records.length > 0 ? (liveState.records[liveState.records.length - 1]?.id ?? 0) : 0;
+
+  const loadOlder = async () => {
+    if (!oldestID) return;
+    setLoadingOlder(true);
+    try {
+      const page = await requestDB.records({ ...filter, before_id: oldestID, page_size: 200 });
+      liveState.appendOlder(page.records);
+    } catch (error) {
+      toast.error(errMessage(error));
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
+
+  const exportCSV = () => {
+    const rows = liveState.records.map((record) => [
+      dayjs(record.requested_at).format("YYYY-MM-DD HH:mm:ss"),
+      record.failed ? record.status_code : 200,
+      record.alias ? `${record.alias} -> ${record.model}` : (record.model ?? ""),
+      record.response_model ?? "",
+      record.provider ?? "",
+      record.effective_service_tier || record.service_tier || "",
+      record.reasoning_effort || record.requested_reasoning_effort || "",
+      record.api_key ?? "",
+      record.input_tokens,
+      record.output_tokens,
+      record.reasoning_tokens,
+      computeCacheHitRate(record),
+      record.total_tokens,
+      record.latency_ms,
+      record.ttft_ms,
+      computeTPS(record.output_tokens, record.latency_ms).toFixed(2),
+    ]);
+    downloadText(
+      `cpa-request-logs.csv`,
+      toCSV([t("common.time"), "status", t("common.model"), "response_model", t("common.provider"), "tier", "thinking_level", t("common.apiKey"), "input", "output", "reasoning", "cache_hit_rate", "total", "latency_ms", "ttft_ms", "tps"], rows),
+    );
+  };
+
+  const statusBadge = (() => {
+    if (liveState.status === "reconnecting") {
+      return <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400"><RadioTower className="mr-1 size-3" />{t("requestLogs.live.reconnecting")}</Badge>;
+    }
+    if (liveState.status === "connecting") {
+      return <Badge variant="outline" className="text-muted-foreground"><Loader2 className="mr-1 size-3 animate-spin" />{t("requestLogs.live.connecting")}</Badge>;
+    }
+    return null;
+  })();
+
+  return (
+    <>
+      <PageHeader title={t("requestLogs.title")} subtitle={t("requestLogs.subtitle")}>
+        <TimeRangeSelect value={range} onChange={setRange} />
+        <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setMaskKeys(!maskKeys)} title={t("common.apiKey")}>
+          {maskKeys ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+        </Button>
+        <Button variant="outline" size="sm" className="h-8 text-xs" onClick={exportCSV} disabled={liveState.records.length === 0}>
+          <Download className="size-3.5" />
+          {t("common.export")}
+        </Button>
+      </PageHeader>
+
+      <RequestDBGate hasRecords={liveState.records.length > 0} status={liveState.status}>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <ModelFilterCombobox
+            placeholder={t("requestLogs.filters.model")}
+            value={filters.model}
+            range={range}
+            onChange={(value) => setFilters((f) => ({ ...f, model: value }))}
+          />
+          <FilterInput placeholder={t("requestLogs.filters.provider")} value={filters.provider} onChange={(value) => setFilters((f) => ({ ...f, provider: value }))} className="w-40 font-mono" />
+          <FilterInput placeholder={t("requestLogs.filters.apiKey")} value={filters.apiKey} onChange={(value) => setFilters((f) => ({ ...f, apiKey: value }))} className="w-44 font-mono" />
+          <Button variant={advancedOpen ? "secondary" : "outline"} size="sm" className="h-8 text-xs" onClick={() => setAdvancedOpen((open) => !open)}>
+            <SlidersHorizontal className="size-3.5" />
+          </Button>
+          <div className="flex-1" />
+          <div className="flex items-center gap-2">
+            {liveState.status === "live" && !liveState.live && liveState.pending > 0 ? (
+              <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => liveState.setLive(true)}>
+                {t("requestLogs.live.paused", { count: liveState.pending })}
+              </Button>
+            ) : null}
+            <Button
+              variant={liveState.live ? "default" : "outline"}
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => liveState.setLive(!liveState.live)}
+            >
+              {liveState.live ? <PauseCircle className="size-3.5" /> : <PlayCircle className="size-3.5" />}
+              {liveState.live ? (
+                <>
+                  <span className="relative flex size-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+                    <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+                  </span>
+                  {t("common.live")}
+                </>
+              ) : (
+                t("common.resume")
+              )}
+            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="icon" className="size-8" onClick={liveState.reload}>
+                  <RefreshCw className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("common.refresh")}</TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
+
+        {advancedOpen ? (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border-border/60 bg-secondary/50 p-2">
+            <FilterInput placeholder={t("requestLogs.filters.sessionId")} value={filters.sessionId} onChange={(value) => setFilters((f) => ({ ...f, sessionId: value }))} className="w-52 font-mono" />
+            <FilterInput placeholder={t("requestLogs.filters.requestId")} value={filters.requestId} onChange={(value) => setFilters((f) => ({ ...f, requestId: value }))} className="w-52 font-mono" />
+            <FilterInput placeholder={t("requestLogs.filters.traceId")} value={filters.traceId} onChange={(value) => setFilters((f) => ({ ...f, traceId: value }))} className="w-40 font-mono" />
+            <FilterInput placeholder={t("requestLogs.filters.statusCode")} value={filters.statusCode} onChange={(value) => setFilters((f) => ({ ...f, statusCode: value.replace(/\D/g, "") }))} className="w-24" />
+            <label className="ml-2 flex items-center gap-2 text-sm">
+              {t("requestLogs.filters.onlyFailures")}
+              <Switch checked={filters.onlyFailed} onCheckedChange={(checked) => setFilters((f) => ({ ...f, onlyFailed: checked }))} />
+            </label>
+          </div>
+        ) : null}
+
+        <div className="card-surface overflow-hidden">
+          <div className="max-h-[calc(100vh-16rem)] overflow-auto">
+            <Table>
+              <TableHeader className="bg-card/95 sticky top-0 z-10 backdrop-blur-sm">
+                <TableRow>
+                  <TableHead className="w-28">{t("requestLogs.table.time")}</TableHead>
+                  <TableHead className="w-16">{t("requestLogs.table.status")}</TableHead>
+                  <TableHead>{t("requestLogs.table.model")}</TableHead>
+                  <TableHead className="w-24">{t("requestLogs.table.provider")}</TableHead>
+                  <TableHead className="w-24">{t("requestLogs.table.tier")}</TableHead>
+                  <TableHead className="w-24">{t("requestLogs.table.thinkingLevel")}</TableHead>
+                  <TableHead className="text-right">{t("requestLogs.table.tokens")}</TableHead>
+                  <TableHead className="text-right w-20">{t("requestLogs.table.ttft")}</TableHead>
+                  <TableHead className="text-right w-20">{t("requestLogs.table.latency")}</TableHead>
+                  <TableHead className="text-right w-16">{t("requestLogs.table.tps")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {liveState.records.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={10} className="h-44 text-center text-muted-foreground text-xs">
+                      {liveState.status === "connecting" ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <Loader2 className="size-4 animate-spin text-blue-500" />
+                          <span>{t("common.loading")}</span>
+                        </div>
+                      ) : (
+                        t("requestLogs.emptyHint") || "当前时间范围与筛选条件下暂无请求记录"
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  liveState.records.map((record) => (
+                    <TableRow key={record.id > 0 ? record.id : `${record.request_id || ""}-${record.requested_at}`} className="cursor-pointer" onClick={() => setSelected(record)}>
+                      <TableCell className="text-muted-foreground font-mono text-xs whitespace-nowrap">{formatTime(record.requested_at, true)}</TableCell>
+                      <TableCell>
+                        <StatusPill
+                          failed={record.failed}
+                          statusCode={record.status_code}
+                          recordId={record.id}
+                          errorBody={record.error_body}
+                          responseHeaders={record.response_headers}
+                          responsePreview={record.response_preview}
+                        />
+                      </TableCell>
+                      <TableCell className="max-w-64">
+                        <ModelChainDisplay record={record} />
+                      </TableCell>
+                      <TableCell className="text-xs truncate max-w-24">{record.provider || "—"}</TableCell>
+                      <TableCell className="max-w-24 truncate font-mono text-xs" title={record.effective_service_tier || record.service_tier || record.response_service_tier || ""}>
+                        {record.effective_service_tier || record.service_tier || record.response_service_tier ? (
+                          <span className="text-foreground">{record.effective_service_tier || record.service_tier || record.response_service_tier}</span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="max-w-24 truncate font-mono text-xs" title={record.reasoning_effort || record.requested_reasoning_effort || ""}>
+                        {record.reasoning_effort || record.requested_reasoning_effort ? (
+                          <span className="text-foreground">{record.reasoning_effort || record.requested_reasoning_effort}</span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs whitespace-nowrap">
+                        <TokenMetricCell record={record} />
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs whitespace-nowrap">
+                        <span className={getTTFTColorClass(record.ttft_ms)}>
+                          {formatLatencySeconds(record.ttft_ms)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs whitespace-nowrap">
+                        <span className={getLatencyColorClass(record.latency_ms)}>
+                          {formatLatencySeconds(record.latency_ms)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs whitespace-nowrap">{record.failed ? "—" : formatTPS(computeTPS(record.output_tokens, record.latency_ms))}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <div className="text-muted-foreground flex items-center justify-between border-t px-3 py-2 text-xs">
+            <span className="flex items-center gap-2">
+              {statusBadge}
+              {formatInt(liveState.records.length)} records
+            </span>
+            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={loadOlder} disabled={loadingOlder || !oldestID}>
+              {loadingOlder ? <Loader2 className="size-3 animate-spin" /> : <ChevronUp className="size-3.5" />}
+              Load older
+            </Button>
+          </div>
+        </div>
+      </RequestDBGate>
+
+      <RecordDetailSheet record={selected} onClose={() => setSelected(null)} onTrace={(traceId) => { setFilters((f) => ({ ...f, traceId })); setSelected(null); }} />
+    </>
+  );
+}
+
+/** Wraps the page body; shows the request-db hint when the store is disabled. */
+function RequestDBGate({ children, hasRecords, status }: { children: React.ReactNode; hasRecords: boolean; status: string }) {
+  const probe = useQuery({
+    queryKey: ["rdb", "probe"],
+    queryFn: () => requestDB.records({ page_size: 1 }),
+    enabled: !hasRecords && status === "reconnecting",
+    retry: false,
+    staleTime: 60_000,
+  });
+
+  if (!hasRecords && probe.error && errStatus(probe.error) === 503) {
+    return <RequestDBDisabled />;
+  }
+  return <>{children}</>;
+}
+
+/** Debounced text filter: keystrokes settle for 300ms before the live
+ *  subscription is torn down and re-attached with the new value. */
+function FilterInput({ placeholder, value, onChange, className }: { placeholder: string; value: string; onChange: (value: string) => void; className?: string }) {
+  const [text, setText] = useState(value);
+  const settled = useRef(text);
+  useEffect(() => {
+    if (text !== settled.current) return;
+    // Sync external clears (e.g. related-trace chips) into the local field.
+    setText(value);
+    settled.current = value;
+  }, [value]);
+  useEffect(() => {
+    if (text === settled.current) return;
+    const timer = setTimeout(() => {
+      settled.current = text;
+      onChange(text);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [text]);
+  return (
+    <Input
+      placeholder={placeholder}
+      value={text}
+      onChange={(event) => setText(event.target.value)}
+      className={`h-8 text-xs ${className ?? ""}`}
+    />
+  );
+}
+
+/** Model filter that doubles as a picker: focusing it lists the models seen in
+ *  the last 24h (request counts included) while free-typed input still
+ *  substring-filters server-side. */
+function ModelFilterCombobox({ placeholder, value, range, onChange }: { placeholder: string; value: string; range: TimeRange; onChange: (value: string) => void; className?: string }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState(value);
+  const settled = useRef(text);
+  useEffect(() => {
+    if (text !== settled.current) return;
+    setText(value);
+    settled.current = value;
+  }, [value]);
+  useEffect(() => {
+    if (text === settled.current) return;
+    const timer = setTimeout(() => {
+      settled.current = text;
+      onChange(text);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [text]);
+
+  const recent = useQuery({
+    queryKey: ["rdb", "model-options", range],
+    queryFn: () => {
+      const resolved = resolveRange(range);
+      return requestDB.breakdown("model", { from: resolved.from, to: range.preset === "custom" ? resolved.to : undefined }, 100);
+    },
+    enabled: open,
+    staleTime: 30_000,
+  });
+  const term = text.trim().toLowerCase();
+  const options = (recent.data ?? []).filter((row) => !term || row.key.toLowerCase().includes(term));
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverAnchor asChild>
+        <Input
+          placeholder={placeholder}
+          className="h-8 w-44 font-mono text-xs"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          onFocus={() => setOpen(true)}
+          onClick={() => setOpen(true)}
+        />
+      </PopoverAnchor>
+      <PopoverContent className="w-64 p-0" align="start" onOpenAutoFocus={(event) => event.preventDefault()}>
+        <Command shouldFilter={false}>
+          <CommandList>
+            {recent.isLoading ? (
+              <p className="text-muted-foreground py-6 text-center text-xs">{t("common.loading")}</p>
+            ) : options.length === 0 ? (
+              <p className="text-muted-foreground py-6 text-center text-xs">{t("requestLogs.filters.noRecentModels")}</p>
+            ) : (
+              options.map((row) => (
+                <CommandItem
+                  key={row.key}
+                  value={row.key}
+                  className="text-xs"
+                  onSelect={() => {
+                    setText(row.key);
+                    settled.current = row.key;
+                    onChange(row.key);
+                    setOpen(false);
+                  }}
+                >
+                  <span className="min-w-0 flex-1 truncate font-mono">{row.key}</span>
+                  <span className="text-muted-foreground ml-2 shrink-0 text-[10px] tabular-nums">{formatNumber(row.requests)}</span>
+                </CommandItem>
+              ))
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}function RecordDetailSheet({ record, onClose, onTrace }: { record: RequestRecord | null; onClose: () => void; onTrace: (traceId: string) => void }) {
+  const { t } = useTranslation();
+  const open = Boolean(record);
+  const detail = useQuery({
+    queryKey: ["rdb", "detail", record?.id],
+    queryFn: () => requestDB.recordDetail(record!.id),
+    enabled: open,
+  });
+  const data = detail.data ?? record;
+
+  return (
+    <Sheet open={open} onOpenChange={(next) => !next && onClose()}>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-xl!">
+        {data ? (
+          <>
+            <SheetHeader>
+              <SheetTitle className="flex items-center gap-2 font-mono text-sm">
+                #{data.id}{" "}
+                <StatusPill
+                  failed={data.failed}
+                  statusCode={data.status_code}
+                  recordId={data.id}
+                  errorBody={data.error_body}
+                  responseHeaders={data.response_headers}
+                  responsePreview={data.response_preview}
+                />
+                <CopyButton text={data.request_id} />
+              </SheetTitle>
+              <SheetDescription className="font-mono text-xs">{data.request_id}</SheetDescription>
+            </SheetHeader>
+            <Tabs defaultValue="overview" className="mt-2">
+              <TabsList className="w-full flex-wrap">
+                <TabsTrigger value="overview">{t("requestLogs.detail.overview")}</TabsTrigger>
+                <TabsTrigger value="headers">{t("requestLogs.detail.headers")}</TabsTrigger>
+                {data.error_body ? <TabsTrigger value="error">{t("requestLogs.detail.error")}</TabsTrigger> : null}
+                {data.request_preview || data.response_preview ? <TabsTrigger value="preview">{t("requestLogs.detail.preview")}</TabsTrigger> : null}
+                {data.token_breakdown ? <TabsTrigger value="breakdown">{t("requestLogs.detail.breakdown")}</TabsTrigger> : null}
+              </TabsList>
+              <TabsContent value="overview" className="space-y-3">
+                <DetailList
+                  rows={[
+                    [t("common.time"), formatTime(data.requested_at, true)],
+                    [t("requestLogs.table.latency"), formatDuration(data.latency_ms)],
+                    [t("requestLogs.table.ttft"), data.ttft_ms > 0 ? formatDuration(data.ttft_ms) : "—"],
+                    [t("requestLogs.table.tps"), data.failed ? "—" : formatTPS(computeTPS(data.output_tokens, data.latency_ms))],
+                    ["Input / Output / Reasoning", `${formatInt(data.input_tokens)} / ${formatInt(data.output_tokens)} / ${formatInt(data.reasoning_tokens)}`],
+                    ["Cached", `${formatInt(data.cached_tokens)} · read ${formatInt(data.cache_read_tokens)} · create ${formatInt(data.cache_creation_tokens)} (hit: ${computeCacheHitRate(data)})`],
+                    [t("requestLogs.detail.endpoint"), data.endpoint || "—"],
+                    [t("requestLogs.detail.requestedModel", "请求模型"), data.alias ? `${data.alias} (alias)` : (data.model || "—")],
+                    [t("requestLogs.detail.upstreamModel", "实际发送模型"), data.model || "—"],
+                    [t("requestLogs.detail.responseModel"), data.response_model || "—"],
+                    [t("common.provider"), data.provider || "—"],
+                    [t("requestLogs.detail.auth"), data.auth_id || data.auth_index ? `${data.auth_id || ""} ${data.auth_index ? `(#${data.auth_index})` : ""}` : "—"],
+                    [t("common.apiKey"), data.api_key ? maskKey(data.api_key) : "—"],
+                    [t("requestLogs.detail.baseUrl"), data.base_url || "—"],
+                    [t("requestLogs.detail.session"), data.session_id || "—"],
+                    [t("requestLogs.detail.clientIp"), data.client_ip || "—"],
+                    [t("requestLogs.detail.userAgent"), data.user_agent || "—"],
+                    [t("requestLogs.detail.tier"), data.effective_service_tier || data.service_tier || "—"],
+                    [t("requestLogs.detail.reasoning"), data.reasoning_effort || data.requested_reasoning_effort || "—"],
+                    ["Stream", String(data.stream)],
+                  ]}
+                />
+                {data.trace_id ? (
+                  <Button variant="outline" size="sm" className="h-8 w-full text-xs" onClick={() => onTrace(data.trace_id!)}>
+                    {t("requestLogs.detail.relatedTrace")} · {data.trace_id}
+                  </Button>
+                ) : null}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-full text-xs"
+                  onClick={async () => {
+                    try {
+                      await fileLogs.downloadRequestLog(data.request_id);
+                    } catch (error) {
+                      toast.error(errMessage(error));
+                    }
+                  }}
+                >
+                  <Download className="size-3.5" />
+                  {t("requestLogs.detail.openFullLog")}
+                </Button>
+              </TabsContent>
+              <TabsContent value="headers" className="space-y-3">
+                <div>
+                  <p className="mb-1 text-xs font-medium">{t("requestLogs.detail.requestHeaders")}</p>
+                  <JsonView value={data.request_headers ?? {}} />
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-medium">{t("requestLogs.detail.responseHeaders")}</p>
+                  <JsonView value={data.response_headers ?? {}} />
+                </div>
+              </TabsContent>
+              {data.error_body ? (
+                <TabsContent value="error">
+                  <JsonView value={data.error_body} />
+                </TabsContent>
+              ) : null}
+              {data.request_preview || data.response_preview ? (
+                <TabsContent value="preview" className="space-y-3">
+                  <div>
+                    <p className="mb-1 text-xs font-medium">Request</p>
+                    <JsonView value={data.request_preview ?? ""} />
+                  </div>
+                  <div>
+                    <p className="mb-1 text-xs font-medium">Response</p>
+                    <JsonView value={data.response_preview ?? ""} />
+                  </div>
+                </TabsContent>
+              ) : null}
+              {data.token_breakdown ? (
+                <TabsContent value="breakdown">
+                  <JsonView value={data.token_breakdown} />
+                </TabsContent>
+              ) : null}
+            </Tabs>
+          </>
+        ) : (
+          <SheetHeader>
+            <SheetTitle>{t("common.loading")}</SheetTitle>
+          </SheetHeader>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}

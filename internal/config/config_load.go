@@ -263,6 +263,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	if cfg.RemoteManagement.PanelGitHubRepository == "" {
 		cfg.RemoteManagement.PanelGitHubRepository = DefaultPanelGitHubRepository
 	}
+	warnDeprecatedPanelSettings(cfg)
 
 	cfg.Pprof.Addr = strings.TrimSpace(cfg.Pprof.Addr)
 	if cfg.Pprof.Addr == "" {
@@ -371,4 +372,15 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 
 	// Return the populated configuration struct.
 	return &cfg, nil
+}
+
+// warnDeprecatedPanelSettings logs warnings for management panel options that
+// no longer have any effect now that the dashboard is embedded in the binary.
+func warnDeprecatedPanelSettings(cfg Config) {
+	if cfg.RemoteManagement.DisableAutoUpdatePanel {
+		log.Warn("management.disable-auto-update-panel is deprecated and ignored: the dashboard is embedded in the binary")
+	}
+	if cfg.RemoteManagement.PanelGitHubRepository != DefaultPanelGitHubRepository {
+		log.Warn("management.panel-github-repository is deprecated and ignored: the dashboard is embedded in the binary")
+	}
 }

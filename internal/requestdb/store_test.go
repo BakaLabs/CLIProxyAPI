@@ -142,12 +142,15 @@ func TestStoreQueryFilters(t *testing.T) {
 		wantIDs []string
 	}{
 		{"model", Query{Model: "gpt-test", Limit: 10}, []string{"req-1"}},
+		{"model-substring", Query{Model: "pt-tes", Limit: 10}, []string{"req-1"}},
+		{"model-substring-no-match", Query{Model: "claude-opus", Limit: 10}, nil},
 		{"provider", Query{Provider: "claude", Limit: 10}, []string{"req-2"}},
 		{"failed", Query{Failed: boolPtr(true), Limit: 10}, []string{"req-3"}},
 		{"not-failed", Query{Failed: boolPtr(false), Limit: 10}, []string{"req-2", "req-1"}},
 		{"status", Query{StatusCode: 502, Limit: 10}, []string{"req-3"}},
 		{"time-range", Query{FromMS: 1500, ToMS: 2500, Limit: 10}, []string{"req-2"}},
 		{"request-id", Query{RequestID: "req-1", Limit: 10}, []string{"req-1"}},
+		{"request-id-substring", Query{RequestID: "eq-2", Limit: 10}, []string{"req-2"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -165,6 +168,47 @@ func TestStoreQueryFilters(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStoreQueryFiltersEscapeLikeWildcards(t *testing.T) {
+	store, _ := openTestStore(t)
+	ctx := context.Background()
+
+	entries := []Entry{
+		sampleEntry("req-1", 1000),
+		sampleEntry("req-2", 2000),
+	}
+	entries[0].Model = "model_100%"
+	entries[1].Model = "modelX100Y"
+	if err := store.InsertBatch(ctx, entries); err != nil {
+		t.Fatalf("InsertBatch() error = %v", err)
+	}
+
+	// An underscore in the input must match literally, not as a single-char wildcard.
+	got, err := store.Query(ctx, Query{Model: "model_100", Limit: 10})
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if len(got) != 1 || got[0].RequestID != "req-1" {
+		t.Fatalf("Query(model_100) matched %v, want only req-1", requestIDs(got))
+	}
+
+	// A percent sign must match literally instead of any suffix.
+	got, err = store.Query(ctx, Query{Model: "100%", Limit: 10})
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if len(got) != 1 || got[0].RequestID != "req-1" {
+		t.Fatalf("Query(100%%) matched %v, want only req-1", requestIDs(got))
+	}
+}
+
+func requestIDs(entries []Entry) []string {
+	ids := make([]string, 0, len(entries))
+	for i := range entries {
+		ids = append(ids, entries[i].RequestID)
+	}
+	return ids
 }
 
 func TestStoreGetByIDDecompressesBlobs(t *testing.T) {

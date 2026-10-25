@@ -56,6 +56,9 @@ _bmad/*
 _bmad-output/*
 .gocache/
 .gitnexus/
+.zcode/
+gui-test-screenshots/
+internal/pluginhost/plugins/
 
 # macOS
 .DS_Store

@@ -1,3 +1,17 @@
+# Stage 1: build the management dashboard (single self-contained HTML file).
+FROM node:24-bookworm AS dashboard
+
+WORKDIR /web
+
+RUN corepack enable
+
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+COPY web/ ./
+RUN pnpm build
+
+# Stage 2: build the server with the dashboard embedded.
 FROM golang:1.26-bookworm AS builder
 
 WORKDIR /app
@@ -9,6 +23,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+
+# Always embed the freshly built dashboard, never a stale local dist.
+COPY --from=dashboard /web/dist/index.html /app/web/dist/index.html
 
 ARG VERSION=dev
 ARG COMMIT=none

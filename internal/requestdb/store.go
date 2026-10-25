@@ -73,6 +73,7 @@ type Entry struct {
 }
 
 // Query selects stored entries. Zero time bounds and empty filters match everything.
+// BeforeID enables keyset pagination ("load older"): rows with id < BeforeID only.
 type Query struct {
 	FromMS     int64
 	ToMS       int64
@@ -81,8 +82,10 @@ type Query struct {
 	Provider   string
 	SessionID  string
 	RequestID  string
+	TraceID    string
 	Failed     *bool
 	StatusCode int
+	BeforeID   int64
 	Limit      int
 	Offset     int
 }
@@ -151,7 +154,7 @@ func (s *Store) InsertBatch(ctx context.Context, entries []Entry) error {
 	}
 	for i := range entries {
 		e := &entries[i]
-		if _, errExec := stmt.ExecContext(ctx,
+		res, errExec := stmt.ExecContext(ctx,
 			e.RequestedAtMS, e.RequestID, e.TraceID, e.Endpoint, e.ClientIP, e.ResolvedClientIP, e.XForwardedFor, e.UserAgent,
 			e.SessionID, e.ParentSessionID, e.APIKey, e.AccessProvider, boolToInt(e.IsNativeKey),
 			e.Provider, e.ExecutorType, e.AuthID, e.AuthIndex, e.AuthType, e.Source, e.BaseURL,
@@ -161,10 +164,14 @@ func (s *Store) InsertBatch(ctx context.Context, entries []Entry) error {
 			e.InputTokens, e.OutputTokens, e.ReasoningTokens, e.CachedTokens, e.CacheReadTokens, e.CacheCreationTokens, e.TotalTokens,
 			nullableBytes(e.TokenBreakdown), nullableBytes(e.RequestHeaders), nullableBytes(e.ResponseHeaders),
 			nullableBytes(e.ErrorBody), nullableBytes(e.RequestPreview), nullableBytes(e.ResponsePreview),
-		); errExec != nil {
+		)
+		if errExec != nil {
 			_ = stmt.Close()
 			_ = tx.Rollback()
 			return fmt.Errorf("requestdb: insert entry: %w", errExec)
+		}
+		if id, errID := res.LastInsertId(); errID == nil && id > 0 {
+			e.ID = id
 		}
 	}
 	if errClose := stmt.Close(); errClose != nil {
@@ -233,8 +240,12 @@ func (s *Store) Query(ctx context.Context, q Query) ([]Entry, error) {
 		service_tier, effective_service_tier, response_service_tier,
 		generate, stream, failed, status_code, latency_ms, ttft_ms,
 		input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_read_tokens, cache_creation_tokens, total_tokens
-		FROM request_logs` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
-	args = append(args, q.Limit, q.Offset)
+		FROM request_logs` + where + ` ORDER BY id DESC`
+	// Limit <= 0 means unlimited; otherwise a paged window.
+	if q.Limit > 0 {
+		stmt += ` LIMIT ? OFFSET ?`
+		args = append(args, q.Limit, q.Offset)
+	}
 	rows, err := s.db.QueryContext(ctx, stmt, args...)
 	if err != nil {
 		return nil, fmt.Errorf("requestdb: query entries: %w", err)
@@ -339,25 +350,35 @@ func buildWhere(q Query) (string, []any) {
 		clauses = append(clauses, "requested_at <= ?")
 		args = append(args, q.ToMS)
 	}
+	// Text filters match by substring so type-as-you go filtering works; LIKE
+	// wildcards inside the input are escaped to match literally.
 	if q.Model != "" {
-		clauses = append(clauses, "model = ?")
-		args = append(args, q.Model)
+		clauses = append(clauses, "model LIKE ? ESCAPE '\\'")
+		args = append(args, likeSubstring(q.Model))
 	}
 	if q.APIKey != "" {
-		clauses = append(clauses, "api_key = ?")
-		args = append(args, q.APIKey)
+		clauses = append(clauses, "api_key LIKE ? ESCAPE '\\'")
+		args = append(args, likeSubstring(q.APIKey))
 	}
 	if q.Provider != "" {
-		clauses = append(clauses, "provider = ?")
-		args = append(args, q.Provider)
+		clauses = append(clauses, "provider LIKE ? ESCAPE '\\'")
+		args = append(args, likeSubstring(q.Provider))
 	}
 	if q.SessionID != "" {
-		clauses = append(clauses, "session_id = ?")
-		args = append(args, q.SessionID)
+		clauses = append(clauses, "session_id LIKE ? ESCAPE '\\'")
+		args = append(args, likeSubstring(q.SessionID))
 	}
 	if q.RequestID != "" {
-		clauses = append(clauses, "request_id = ?")
-		args = append(args, q.RequestID)
+		clauses = append(clauses, "request_id LIKE ? ESCAPE '\\'")
+		args = append(args, likeSubstring(q.RequestID))
+	}
+	if q.TraceID != "" {
+		clauses = append(clauses, "trace_id LIKE ? ESCAPE '\\'")
+		args = append(args, likeSubstring(q.TraceID))
+	}
+	if q.BeforeID > 0 {
+		clauses = append(clauses, "id < ?")
+		args = append(args, q.BeforeID)
 	}
 	if q.Failed != nil {
 		clauses = append(clauses, "failed = ?")
@@ -371,4 +392,13 @@ func buildWhere(q Query) (string, []any) {
 		return "", nil
 	}
 	return " WHERE " + strings.Join(clauses, " AND "), args
+}
+
+// likeSubstring wraps value with LIKE wildcards, escaping the wildcard and
+// escape characters so user input matches literally.
+func likeSubstring(value string) string {
+	escaped := strings.ReplaceAll(value, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `%`, `\%`)
+	escaped = strings.ReplaceAll(escaped, `_`, `\_`)
+	return "%" + escaped + "%"
 }

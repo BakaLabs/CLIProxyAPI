@@ -23,7 +23,7 @@ const (
 	// writeBatchLimit and writeFlushInterval trade insert throughput (one
 	// transaction per batch) against visibility delay for queries.
 	writeBatchLimit     = 256
-	writeFlushInterval  = 500 * time.Millisecond
+	writeFlushInterval  = 100 * time.Millisecond
 	retentionSweepEvery = time.Hour
 	// defaultRetentionDays / defaultErrorBodyMaxBytes mirror the config defaults.
 	defaultRetentionDays     = 30
@@ -123,6 +123,11 @@ func PreviewBytes() int {
 		return 0
 	}
 	return int(cfgPreviewBytes.Load())
+}
+
+// Enabled reports whether the request database is currently open.
+func Enabled() bool {
+	return enabled()
 }
 
 func enabled() bool {
@@ -335,5 +340,10 @@ func (w *writer) insertBatch(batch []Entry) {
 			return
 		}
 		log.WithError(err).WithField("entries", len(compressed)).Error("requestdb: failed to insert request log batch")
+		return
+	}
+	for i := range compressed {
+		batch[i].ID = compressed[i].ID
+		publishStreamEntry(&batch[i])
 	}
 }

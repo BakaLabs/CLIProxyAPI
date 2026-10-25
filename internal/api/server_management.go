@@ -315,26 +315,21 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
-	filePath := managementasset.FilePath(s.configFilePath)
-	if strings.TrimSpace(filePath) == "" {
-		c.AbortWithStatus(http.StatusNotFound)
-		return
-	}
 
-	if _, err := os.Stat(filePath); err != nil {
-		if os.IsNotExist(err) {
-			// Synchronously ensure management.html is available with a detached context.
-			// Control panel bootstrap should not be canceled by client disconnects.
-			if !managementasset.EnsureLatestManagementHTML(context.Background(), managementasset.StaticDir(s.configFilePath), cfg.ProxyURL, cfg.RemoteManagement.PanelGitHubRepository) {
-				c.AbortWithStatus(http.StatusNotFound)
-				return
-			}
-		} else {
-			log.WithError(err).Error("failed to stat management control panel asset")
-			c.AbortWithStatus(http.StatusInternalServerError)
+	// Development override: serve the panel from disk when MANAGEMENT_STATIC_PATH is set.
+	if overridePath, ok := managementasset.DiskOverridePath(); ok {
+		if _, err := os.Stat(overridePath); err == nil {
+			c.File(overridePath)
 			return
 		}
 	}
 
-	c.File(filePath)
+	data, err := managementasset.EmbeddedHTML()
+	if err != nil || len(data) == 0 {
+		log.Error("management control panel is not available; run pnpm -C web build and rebuild the binary")
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+	c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+	c.Data(http.StatusOK, "text/html; charset=utf-8", data)
 }

@@ -139,3 +139,35 @@ func TestRetentionSweepsExpiredEntriesOnOpen(t *testing.T) {
 		t.Fatalf("surviving entry = %q, want fresh", entries[0].RequestID)
 	}
 }
+
+func TestActiveManagerPublishesLiveStreamWithRealID(t *testing.T) {
+	t.Cleanup(Shutdown)
+	dir := t.TempDir()
+	opts := testOptions(dir, func(o *Options) { o.RetentionDays = 0 })
+	SetConfig(opts)
+	defer Shutdown()
+
+	sub := SubscribeStream(Query{})
+	defer UnsubscribeStream(sub)
+
+	plugin := &usageRecordPlugin{}
+	plugin.HandleUsage(context.Background(), coreusage.Record{
+		RequestID:   "exec-live-1",
+		Provider:    "codex",
+		Model:       "gpt-test",
+		RequestedAt: time.Now(),
+		Detail:      coreusage.Detail{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
+	})
+
+	select {
+	case got := <-sub.Channel():
+		if got.ID <= 0 {
+			t.Fatalf("live entry ID = %d, want > 0", got.ID)
+		}
+		if got.RequestID != "exec-live-1" {
+			t.Fatalf("live entry RequestID = %s, want exec-live-1", got.RequestID)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for live stream record")
+	}
+}

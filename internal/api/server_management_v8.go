@@ -27,6 +27,7 @@ func (s *Server) registerManagementV8Routes() {
 		v8.Handle(method, "/config/*path", s.mgmt.ConfigV8)
 	}
 
+	v8.GET("/server/info", s.mgmt.GetServerInfo)
 	v8.GET("/server/latest-version", s.mgmt.GetLatestVersion)
 	v8.POST("/requests/api-call", s.mgmt.APICall)
 	v8.POST("/routing/cooldown/reset", s.mgmt.ResetQuota)
@@ -41,6 +42,10 @@ func (s *Server) registerManagementV8Routes() {
 	v8.GET("/observability/usage/queue", s.mgmt.GetUsageQueue)
 	v8.GET("/observability/request-db/records", s.mgmt.GetRequestDBRecords)
 	v8.GET("/observability/request-db/records/:id", s.mgmt.GetRequestDBRecordDetail)
+	v8.GET("/observability/request-db/stats", s.mgmt.GetRequestDBStats)
+	v8.GET("/observability/request-db/timeseries", s.mgmt.GetRequestDBTimeseries)
+	v8.GET("/observability/request-db/breakdown", s.mgmt.GetRequestDBBreakdown)
+	v8.GET("/observability/request-db/stream", s.mgmt.GetRequestDBStream)
 
 	v8.GET("/credentials", s.mgmt.ListAuthFiles)
 	v8.POST("/credentials", s.mgmt.UploadAuthFileV8)
@@ -57,6 +62,10 @@ func (s *Server) registerManagementV8Routes() {
 	v8.GET("/credentials/siwc/status", s.mgmt.GetSIWCStatus)
 	v8.GET("/oauth/status", s.mgmt.GetAuthStatus)
 	v8.DELETE("/oauth/session", s.mgmt.CancelAuthSession)
+
+	v8.GET("/quota/providers", s.mgmt.GetQuotaProviders)
+	v8.POST("/quota/fetch", s.mgmt.FetchCredentialQuota)
+	v8.POST("/quota/reset", s.mgmt.ResetCredentialQuota)
 
 	v8.GET("/plugins", s.mgmt.ListPlugins)
 	v8.DELETE("/plugins/:id", s.mgmt.DeletePlugin)

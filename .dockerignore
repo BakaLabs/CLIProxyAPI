@@ -24,6 +24,8 @@ config.yaml
 # Development/editor
 bin
 .vscode
+web/node_modules
+web/dist
 .claude
 .codex
 .codex-worktrees

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,14 +24,24 @@ func init() {
 // assembly; blob compression and SQLite writes happen on the writer goroutine.
 type usageRecordPlugin struct{}
 
+var ephemeralStreamID atomic.Int64
+
 func (p *usageRecordPlugin) HandleUsage(ctx context.Context, record coreusage.Record) {
 	mu.Lock()
 	mgr := active
 	mu.Unlock()
-	if mgr == nil {
+	streamSubs := streamSubscriberCount()
+	if mgr == nil && streamSubs == 0 {
 		return
 	}
-	mgr.enqueue(buildEntry(ctx, record))
+	entry := buildEntry(ctx, record)
+	if mgr == nil {
+		// Store is disabled, but live stream is active. Assign an ephemeral ID.
+		entry.ID = ephemeralStreamID.Add(1)
+		publishStreamEntry(&entry)
+		return
+	}
+	mgr.enqueue(entry)
 }
 
 // buildEntry maps a usage record plus request-scoped context holders onto a

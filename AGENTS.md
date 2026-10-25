@@ -13,8 +13,11 @@ go run ./cmd/server # Run dev server
 go test ./... # Run all tests
 go test -v -run TestName ./path/to/pkg # Run single test
 go build -o test-output ./cmd/server && rm test-output # Verify compile (REQUIRED after changes)
+pnpm -C web install && pnpm -C web build # Build the management dashboard (REQUIRED before shipping binaries)
+pnpm -C web lint # Frontend lint (run from repo root: make lint)
 ```
 - Common flags: `--config <path>`, `--tui`, `--standalone`, `--local-model`, `--no-browser`, `--oauth-callback-port <port>`
+- Frontend dev loop: `pnpm -C web dev` (Vite on :5177, proxies /v0,/v8 management APIs to :8317); or point `MANAGEMENT_STATIC_PATH` at `web/dist` to iterate against a real server binary.
 
 ## Config
 - Default config: `config.yaml` (template: `config.example.yaml`)
@@ -31,7 +34,9 @@ go build -o test-output ./cmd/server && rm test-output # Verify compile (REQUIRE
 - `internal/translator/` — Provider protocol translators (and shared `common`)
 - `internal/registry/` — Model registry + remote updater (`StartModelsUpdater`); `--local-model` disables remote updates
 - `internal/store/` — Storage implementations and secret resolution
-- `internal/managementasset/` — Config snapshots and management assets
+- `internal/managementasset/` — Serves the embedded management dashboard (`web/` build output via `go:embed`; `MANAGEMENT_STATIC_PATH` overrides for development). The old GitHub-download auto-updater was removed; `management.panel-github-repository` / `disable-auto-update-panel` are deprecated no-op config fields kept only so legacy configs parse.
+- `internal/requestdb/` — SQLite request metadata store + stats/timeseries/breakdown aggregations + SSE live-tail hub. New management endpoints live under `/v8/management/observability/request-db/*` only (never `/v0/management`).
+- `web/` — Management dashboard frontend (pnpm + React 19 + Vite + Tailwind v4 + shadcn/ui). Built to a single `dist/index.html` via `vite-plugin-singlefile` and embedded by `web/embed.go`. Committed placeholder keeps bare `go build` working; release CI/Docker build the frontend first.
 - `internal/cache/` — Request signature caching
 - `internal/watcher/` — Config hot-reload and watchers
 - `internal/wsrelay/` — WebSocket relay sessions
