@@ -471,10 +471,12 @@ function FetchModelsDialog({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
 
-  const run = async () => {
+  const runWithKey = async (indexStr: string) => {
+    const key = keys[Number(indexStr)] ?? "";
+    if (!key) return;
     setBusy(true);
     try {
-      const names = await fetchUpstreamModels({ ...target, apiKey: keys[Number(keyIndex)] ?? "" });
+      const names = await fetchUpstreamModels({ ...target, apiKey: key });
       setFetched(names);
       setSelected(new Set(names));
       if (names.length === 0) toast.info(t("providers.fetchedEmpty"));
@@ -485,6 +487,12 @@ function FetchModelsDialog({
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (keys.length > 0 && keys[0]) {
+      void runWithKey("0");
+    }
+  }, []);
 
   const visible = (fetched ?? []).filter((name) => name.toLowerCase().includes(filter.toLowerCase()));
   const toggle = (name: string, checked: boolean) => {
@@ -505,7 +513,13 @@ function FetchModelsDialog({
         </DialogHeader>
         <div className="flex items-center gap-2 pb-4">
           {keys.length > 1 ? (
-            <Select value={keyIndex} onValueChange={setKeyIndex}>
+            <Select
+              value={keyIndex}
+              onValueChange={(val) => {
+                setKeyIndex(val);
+                void runWithKey(val);
+              }}
+            >
               <SelectTrigger className="h-8 w-56 font-mono text-xs">
                 <SelectValue />
               </SelectTrigger>
@@ -518,7 +532,7 @@ function FetchModelsDialog({
               </SelectContent>
             </Select>
           ) : null}
-          <Button size="sm" className="h-8 text-xs" onClick={run} disabled={busy}>
+          <Button size="sm" className="h-8 text-xs" onClick={() => void runWithKey(keyIndex)} disabled={busy}>
             {busy ? <Loader2 className="size-3.5 animate-spin" /> : <FlaskConical className="size-3.5" />}
             {t("providers.fetch")}
           </Button>
@@ -561,8 +575,17 @@ function FetchModelsDialog({
           </>
         ) : (
           <div className="flex flex-col items-center justify-center py-10 text-center">
-            <FlaskConical className="size-8 text-slate-300 dark:text-slate-600 mb-2" />
-            <p className="text-muted-foreground text-xs">{t("providers.fetchIdle")}</p>
+            {busy ? (
+              <>
+                <Loader2 className="size-8 animate-spin text-blue-500 mb-2" />
+                <p className="text-muted-foreground text-xs">{t("common.loading")}</p>
+              </>
+            ) : (
+              <>
+                <FlaskConical className="size-8 text-slate-300 dark:text-slate-600 mb-2" />
+                <p className="text-muted-foreground text-xs">{t("providers.fetchIdle")}</p>
+              </>
+            )}
           </div>
         )}
         <DialogFooter className="pt-4">

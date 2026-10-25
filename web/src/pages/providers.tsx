@@ -3,7 +3,6 @@ import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Activity,
   Boxes,
   Check,
   ChevronRight,
@@ -12,7 +11,6 @@ import {
   Cpu,
   Ellipsis,
   Feather,
-  FlaskConical,
   Gem,
   Infinity as InfinityIcon,
   KeyRound,
@@ -70,11 +68,8 @@ import type { ModelEntry } from "@/components/providers/model-editor";
 import {
   ALL_KINDS,
   COMPAT_KIND,
-  probeUpstream,
-  targetFor,
   type Entry,
   type KindMeta,
-  type ProbeResult,
 } from "@/components/providers/provider-tools";
 import { providerLists } from "@/api/management";
 import { errMessage } from "@/api/types";
@@ -116,7 +111,7 @@ export interface ProviderRow {
   entry: Entry;
 }
 
-type SortMode = "enabled" | "priority" | "name" | "latency";
+type SortMode = "enabled" | "priority" | "name";
 type ViewMode = "cards" | "table";
 type StatusFilter = "all" | "enabled" | "disabled";
 
@@ -145,11 +140,6 @@ export function ProvidersPage() {
   // Inspector Dialogs
   const [inspectingModels, setInspectingModels] = useState<ProviderRow | null>(null);
   const [inspectingCurl, setInspectingCurl] = useState<ProviderRow | null>(null);
-
-  // Latency & Probe state map: "kindId:index" -> ProbeResult & latency
-  const [probeMap, setProbeMap] = useState<Record<string, ProbeResult & { latency?: number }>>({});
-  const [probingKeys, setProbingKeys] = useState<Set<string>>(new Set());
-  const [batchProbing, setBatchProbing] = useState(false);
 
   /** Write one entry back to its list (index -1 appends; null deletes). */
   const persist = useMutation({
@@ -246,14 +236,9 @@ export function ProvidersPage() {
       if (sortMode === "priority") {
         return (b.priority ?? 0) - (a.priority ?? 0) || a.name.localeCompare(b.name);
       }
-      if (sortMode === "latency") {
-        const latA = probeMap[`${a.kind.id}:${a.index}`]?.latency ?? 999999;
-        const latB = probeMap[`${b.kind.id}:${b.index}`]?.latency ?? 999999;
-        return latA - latB;
-      }
       return a.name.localeCompare(b.name);
     });
-  }, [allRows, kindFilter, statusFilter, search, sortMode, probeMap]);
+  }, [allRows, kindFilter, statusFilter, search, sortMode]);
 
   // Global counts for metrics banner
   const totalCount = allRows.length;
@@ -261,17 +246,6 @@ export function ProvidersPage() {
   const disabledCount = totalCount - enabledCount;
   const totalKeysCount = allRows.reduce((sum, r) => sum + r.keyCount, 0);
   const totalModelsCount = allRows.reduce((sum, r) => sum + r.modelCount, 0);
-
-  // Latency calculation from probed results
-  const probedEntries = Object.values(probeMap);
-  const probedCount = probedEntries.length;
-  const probedSuccess = probedEntries.filter((p) => p.ok).length;
-  const avgLatency =
-    probedCount > 0
-      ? Math.round(
-          probedEntries.reduce((sum, p) => sum + (p.latency ?? 0), 0) / probedCount,
-        )
-      : null;
 
   const counts = useMemo(() => {
     const data = overview.data ?? {};
@@ -315,75 +289,12 @@ export function ProvidersPage() {
     persist.mutate({ kind: row.kind, index: row.index, entry: nextEntry });
   };
 
-  // Single Probe Execution
-  const runProbe = async (row: ProviderRow) => {
-    const apiKey = row.keys[0] ?? "";
-    if (!apiKey) {
-      toast.warning(t("providers.probeNeedsBaseAndKey"));
-      return;
-    }
-    const rowKey = `${row.kind.id}:${row.index}`;
-    setProbingKeys((prev) => new Set(prev).add(rowKey));
-    const start = Date.now();
-    try {
-      const res = await probeUpstream(
-        targetFor(row.kind, row.baseURL, apiKey, String(row.entry["proxy-url"] ?? "") || undefined),
-      );
-      setProbeMap((prev) => ({ ...prev, [rowKey]: { ...res, latency: Date.now() - start } }));
-    } finally {
-      setProbingKeys((prev) => {
-        const next = new Set(prev);
-        next.delete(rowKey);
-        return next;
-      });
-    }
-  };
-
-  // Batch Probe All Enabled Providers
-  const runBatchProbeAll = async () => {
-    const active = allRows.filter((r) => !r.disabled && r.keys[0]);
-    if (active.length === 0) {
-      toast.info(t("providers.probeNeedsBaseAndKey"));
-      return;
-    }
-
-    setBatchProbing(true);
-    let success = 0;
-    let failed = 0;
-
-    for (const row of active) {
-      const rowKey = `${row.kind.id}:${row.index}`;
-      setProbingKeys((prev) => new Set(prev).add(rowKey));
-      const start = Date.now();
-      try {
-        const res = await probeUpstream(
-          targetFor(row.kind, row.baseURL, row.keys[0]!, String(row.entry["proxy-url"] ?? "") || undefined),
-        );
-        const resultWithLatency = { ...res, latency: Date.now() - start };
-        setProbeMap((prev) => ({ ...prev, [rowKey]: resultWithLatency }));
-        if (res.ok) success++;
-        else failed++;
-      } catch {
-        failed++;
-      } finally {
-        setProbingKeys((prev) => {
-          const next = new Set(prev);
-          next.delete(rowKey);
-          return next;
-        });
-      }
-    }
-
-    setBatchProbing(false);
-    toast.success(t("providers.batchProbeComplete", { success, failed }));
-  };
-
   return (
     <>
       <PageHeader title={t("nav.providersItem")} subtitle={t("providers.subtitle")} />
 
       {/* Top Overview Metrics Banner (宏观大盘看板) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mb-6">
         <div className="card-surface p-4.5 rounded-2xl border border-slate-200/80 bg-white/95 dark:border-slate-800/80 dark:bg-slate-900/90 shadow-2xs flex items-center justify-between">
           <div>
             <p className="text-xs text-slate-400 font-medium">{t("providers.stats.totalProviders")}</p>
@@ -414,21 +325,6 @@ export function ProvidersPage() {
           </div>
           <div className="size-11 rounded-2xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center">
             <Cpu className="size-5" />
-          </div>
-        </div>
-
-        <div className="card-surface p-4.5 rounded-2xl border border-slate-200/80 bg-white/95 dark:border-slate-800/80 dark:bg-slate-900/90 shadow-2xs flex items-center justify-between">
-          <div>
-            <p className="text-xs text-slate-400 font-medium">{t("providers.stats.probeLatency")}</p>
-            <p className="text-2xl font-bold font-mono text-slate-900 dark:text-slate-100 mt-1">
-              {avgLatency !== null ? `${avgLatency}ms` : "—"}
-            </p>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              {probedCount > 0 ? t("providers.stats.probedSummary", { count: probedCount, rate: Math.round((probedSuccess / probedCount) * 100) }) : t("providers.stats.probeAllHint")}
-            </p>
-          </div>
-          <div className="size-11 rounded-2xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center">
-            <Activity className="size-5" />
           </div>
         </div>
       </div>
@@ -507,21 +403,8 @@ export function ProvidersPage() {
             <SelectItem value="enabled">{t("providers.sort.enabledFirst") || "优先已启用"}</SelectItem>
             <SelectItem value="priority">{t("providers.sort.priority") || "按优先级"}</SelectItem>
             <SelectItem value="name">{t("providers.sort.name") || "按名称"}</SelectItem>
-            <SelectItem value="latency">{t("dashboard.charts.latency") || "按延迟"}</SelectItem>
           </SelectContent>
         </Select>
-
-        {/* Batch Probe All Button */}
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8.5 gap-1.5 rounded-xl text-xs bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-2xs hover:border-blue-400 hover:text-blue-600"
-          onClick={runBatchProbeAll}
-          disabled={batchProbing}
-        >
-          {batchProbing ? <Loader2 className="size-3.5 animate-spin text-blue-500" /> : <FlaskConical className="size-3.5 text-blue-500" />}
-          <span>{batchProbing ? t("providers.batchProbing") : t("providers.batchProbe")}</span>
-        </Button>
 
         {/* View Mode Toggle (Cards vs Table) */}
         <div className="flex items-center rounded-xl border border-slate-200/80 bg-white p-0.5 dark:border-slate-800 dark:bg-slate-900 shadow-2xs">
@@ -619,16 +502,11 @@ export function ProvidersPage() {
         <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           {rows.map((row) => {
             const rowKey = `${row.kind.id}:${row.index}`;
-            const probe = probeMap[rowKey];
-            const isProbing = probingKeys.has(rowKey);
 
             return (
               <ProviderCardElement
                 key={rowKey}
                 row={row}
-                probe={probe}
-                probing={isProbing}
-                onProbe={() => runProbe(row)}
                 onEdit={setCompatEditing}
                 onEditKey={setKeyEditing}
                 onDelete={setPendingDelete}
@@ -649,24 +527,19 @@ export function ProvidersPage() {
                 <TableHead>{t("providers.table.identity")}</TableHead>
                 <TableHead className="min-w-48">{t("providers.table.address")}</TableHead>
                 <TableHead className="w-40">{t("providers.models")}</TableHead>
-                <TableHead className="w-32">{t("providers.behavior")}</TableHead>
+                <TableHead className="w-28 text-center">{t("common.status") || "状态"}</TableHead>
                 <TableHead className="w-20 text-center">{t("providers.enabled")}</TableHead>
-                <TableHead className="w-44 text-right">{t("providers.table.actions")}</TableHead>
+                <TableHead className="w-40 text-right">{t("providers.table.actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.map((row) => {
                 const rowKey = `${row.kind.id}:${row.index}`;
-                const probe = probeMap[rowKey];
-                const isProbing = probingKeys.has(rowKey);
 
                 return (
                   <ProviderTableRowElement
                     key={rowKey}
                     row={row}
-                    probe={probe}
-                    probing={isProbing}
-                    onProbe={() => runProbe(row)}
                     onEdit={setCompatEditing}
                     onEditKey={setKeyEditing}
                     onDelete={setPendingDelete}
@@ -798,9 +671,6 @@ function maskIdentity(entry: Entry, kind: KindMeta): string {
 /** Spacious, High-Density, Breathable Provider Card */
 function ProviderCardElement({
   row,
-  probe,
-  probing,
-  onProbe,
   onEdit,
   onEditKey,
   onDelete,
@@ -809,9 +679,6 @@ function ProviderCardElement({
   onOpenCurl,
 }: {
   row: ProviderRow;
-  probe?: ProbeResult & { latency?: number };
-  probing: boolean;
-  onProbe: () => void;
   onEdit: (value: { index: number; provider: CompatProvider }) => void;
   onEditKey: (value: { kind: KindMeta; index: number; entry: Entry }) => void;
   onDelete: (row: ProviderRow) => void;
@@ -878,9 +745,7 @@ function ProviderCardElement({
               className={`size-2 rounded-full ${
                 row.disabled
                   ? "bg-slate-300 dark:bg-slate-600"
-                  : probe && !probe.ok
-                  ? "bg-rose-500 animate-pulse"
-                  : "bg-emerald-500 animate-pulse"
+                  : "bg-emerald-500"
               }`}
             />
             <Switch
@@ -898,20 +763,7 @@ function ProviderCardElement({
               {row.name || t("common.unknown")}
             </h4>
 
-            {/* Probe Status Pill */}
-            {probe ? (
-              probe.ok ? (
-                <Badge variant="outline" className="gap-1 border-emerald-500/40 bg-emerald-500/10 text-[10px] text-emerald-600 dark:text-emerald-400 font-mono">
-                  <span>{probe.code || 200} OK</span>
-                  {probe.latency && <span>· {probe.latency}ms</span>}
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="border-rose-500/40 bg-rose-500/10 text-[10px] text-rose-600 dark:text-rose-400 font-mono" title={probe.message}>
-                  <span>{probe.code ?? "ERR"}</span>
-                  {probe.latency && <span>· {probe.latency}ms</span>}
-                </Badge>
-              )
-            ) : row.disabled ? (
+            {row.disabled ? (
               <Badge variant="outline" className="text-[10px] text-slate-400 border-slate-200">
                 {t("providers.disabledTag")}
               </Badge>
@@ -980,19 +832,6 @@ function ProviderCardElement({
       {/* Card Footer Actions: Rich & Effortless */}
       <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-800/70 pt-3 mt-4">
         <div className="flex items-center gap-1.5">
-          {/* Probe Upstream Button */}
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7.5 gap-1.5 px-2.5 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg border-blue-200 dark:border-blue-900/60"
-            disabled={probing || !row.keys[0]}
-            onClick={onProbe}
-            title={t("providers.test")}
-          >
-            {probing ? <Loader2 className="size-3.5 animate-spin" /> : <FlaskConical className="size-3.5" />}
-            <span>{probing ? t("providers.probing") : t("providers.probe")}</span>
-          </Button>
-
           {/* One-click Playground Test */}
           <Button
             variant="ghost"
@@ -1040,9 +879,6 @@ function ProviderCardElement({
 /** Provider Table Row Element with Matching Ergonomics */
 function ProviderTableRowElement({
   row,
-  probe,
-  probing,
-  onProbe,
   onEdit,
   onEditKey,
   onDelete,
@@ -1051,9 +887,6 @@ function ProviderTableRowElement({
   onOpenCurl,
 }: {
   row: ProviderRow;
-  probe?: ProbeResult & { latency?: number };
-  probing: boolean;
-  onProbe: () => void;
   onEdit: (value: { index: number; provider: CompatProvider }) => void;
   onEditKey: (value: { kind: KindMeta; index: number; entry: Entry }) => void;
   onDelete: (row: ProviderRow) => void;
@@ -1143,19 +976,9 @@ function ProviderTableRowElement({
         </div>
       </TableCell>
 
-      {/* Probe Status */}
-      <TableCell>
-        {probe ? (
-          probe.ok ? (
-            <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-[10px] text-emerald-600 dark:text-emerald-400 font-mono">
-              {probe.code || 200} · {probe.latency}ms
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="border-rose-500/40 bg-rose-500/10 text-[10px] text-rose-600 dark:text-rose-400 font-mono" title={probe.message}>
-              {probe.code ?? "ERR"} · {probe.latency}ms
-            </Badge>
-          )
-        ) : row.disabled ? (
+      {/* Status */}
+      <TableCell className="text-center">
+        {row.disabled ? (
           <Badge variant="outline" className="text-[10px] text-slate-400">{t("providers.disabledTag")}</Badge>
         ) : (
           <Badge variant="outline" className="text-[10px] text-emerald-600/80 border-emerald-500/20">{t("providers.ready")}</Badge>
@@ -1174,17 +997,6 @@ function ProviderTableRowElement({
       {/* Actions */}
       <TableCell>
         <div className="flex items-center justify-end gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-7.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40"
-            title={t("providers.test")}
-            disabled={probing || !row.keys[0]}
-            onClick={onProbe}
-          >
-            {probing ? <Loader2 className="size-3.5 animate-spin" /> : <FlaskConical className="size-3.5" />}
-          </Button>
-
           <Button
             variant="ghost"
             size="icon"

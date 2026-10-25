@@ -20,7 +20,8 @@ import { TimeRangeSelect } from "@/components/shared/time-range-select";
 import { requestDB, fileLogs, type RecordFilter } from "@/api/management";
 import { errMessage, errStatus, type RequestRecord } from "@/api/types";
 import { useLiveRecords } from "@/hooks/use-live-records";
-import { computeCacheHitRate, computeTPS, dayjs, downloadText, formatDuration, formatInt, formatLatencySeconds, formatNumber, formatTPS, formatTime, getLatencyColorClass, getTTFTColorClass, maskKey, toCSV } from "@/lib/format";
+import { computeCacheHitRate, computeTPS, dayjs, downloadText, formatDuration, formatInt, formatLatencySeconds, formatNumber, formatTPS, formatTime, formatUSD, getLatencyColorClass, getTTFTColorClass, maskKey, toCSV } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { usePrefsStore, resolveRange, type TimeRange } from "@/stores/prefs";
 
 interface Filters {
@@ -56,29 +57,37 @@ function toRecordFilter(filters: Filters, range: TimeRange): RecordFilter {
 }
 
 function ModelChainDisplay({ record }: { record: RequestRecord }) {
+  const { t } = useTranslation();
   const requested = record.alias?.trim() || record.model?.trim() || "—";
   const sent = record.model?.trim() || "";
   const response = record.response_model?.trim() || "";
 
-  const hasAliasDiff = Boolean(record.alias?.trim() && record.alias.trim() !== sent);
+  const hasAliasDiff = Boolean(record.alias?.trim() && sent && record.alias.trim() !== sent);
   const hasResponseDiff = Boolean(response && response !== sent && response !== requested);
 
   if (!hasAliasDiff && !hasResponseDiff) {
     return (
-      <span className="font-mono text-xs text-foreground truncate" title={sent || "—"}>
-        {sent || "—"}
+      <span className="font-mono text-xs text-foreground truncate block max-w-full" title={sent || requested || "—"}>
+        {sent || requested || "—"}
       </span>
     );
   }
 
+  // Warning amber only applies when upstream unexpectedly substituted a model different
+  // from what was sent, during an existing alias chain (requested -> sent -> unexpected response).
+  // A direct requested -> response transition is normal alias/canonical mapping and should be muted gray.
+  const isUnexpectedResponse = hasAliasDiff && hasResponseDiff;
+
   const tooltipLines = [
-    `Requested: ${requested}`,
-    sent && sent !== requested ? `Sent upstream: ${sent}` : null,
-    response && response !== sent ? `Upstream response: ${response}` : null,
-  ].filter(Boolean).join("\n");
+    `${t("requestLogs.detail.requestedModel", "Requested model")}: ${requested}`,
+    hasAliasDiff && sent ? `${t("requestLogs.detail.upstreamModel", "Actual model")}: ${sent}` : null,
+    hasResponseDiff ? `${t("requestLogs.detail.responseModel", "Response model")}: ${response}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return (
-    <div className="flex items-center gap-1 font-mono text-xs min-w-0" title={tooltipLines}>
+    <div className="flex w-full items-center gap-1 font-mono text-xs min-w-0" title={tooltipLines}>
       <span className="truncate min-w-0 shrink">{requested}</span>
       {hasAliasDiff && sent ? (
         <>
@@ -88,8 +97,8 @@ function ModelChainDisplay({ record }: { record: RequestRecord }) {
       ) : null}
       {hasResponseDiff ? (
         <>
-          <span className="text-amber-500 dark:text-amber-400 shrink-0">→</span>
-          <span className="text-amber-600 dark:text-amber-400 font-medium truncate min-w-0 shrink">{response}</span>
+          <span className={cn("shrink-0", isUnexpectedResponse ? "text-amber-500 dark:text-amber-400" : "text-muted-foreground/60")}>→</span>
+          <span className={cn("truncate min-w-0 shrink", isUnexpectedResponse ? "text-amber-600 dark:text-amber-400 font-medium" : "text-muted-foreground")}>{response}</span>
         </>
       ) : null}
     </div>
@@ -159,10 +168,11 @@ export function RequestLogsPage() {
       record.latency_ms,
       record.ttft_ms,
       computeTPS(record.output_tokens, record.latency_ms).toFixed(2),
+      record.estimated_cost_usd !== undefined ? record.estimated_cost_usd.toFixed(4) : "",
     ]);
     downloadText(
       `cpa-request-logs.csv`,
-      toCSV([t("common.time"), "status", t("common.model"), "response_model", t("common.provider"), "tier", "thinking_level", t("common.apiKey"), "input", "output", "reasoning", "cache_hit_rate", "total", "latency_ms", "ttft_ms", "tps"], rows),
+      toCSV([t("common.time"), "status", t("common.model"), "response_model", t("common.provider"), "tier", "thinking_level", t("common.apiKey"), "input", "output", "reasoning", "cache_hit_rate", "total", "latency_ms", "ttft_ms", "tps", "cost_usd"], rows),
     );
   };
 
@@ -254,7 +264,7 @@ export function RequestLogsPage() {
 
         <div className="card-surface overflow-hidden">
           <div className="max-h-[calc(100vh-16rem)] overflow-auto">
-            <Table className="min-w-[1100px] table-fixed">
+            <Table className="min-w-[1180px] table-fixed">
               <TableHeader className="bg-card/95 sticky top-0 z-10 backdrop-blur-sm">
                 <TableRow>
                   <TableHead className="w-32">{t("requestLogs.table.time")}</TableHead>
@@ -267,12 +277,13 @@ export function RequestLogsPage() {
                   <TableHead className="w-20 text-right">{t("requestLogs.table.ttft")}</TableHead>
                   <TableHead className="w-20 text-right">{t("requestLogs.table.latency")}</TableHead>
                   <TableHead className="w-20 text-right">{t("requestLogs.table.tps")}</TableHead>
+                  <TableHead className="w-24 text-right">{t("requestLogs.table.cost", "价格")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {liveState.records.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="h-44 text-center text-muted-foreground text-xs">
+                    <TableCell colSpan={11} className="h-44 text-center text-muted-foreground text-xs">
                       {liveState.status === "connecting" ? (
                         <div className="flex items-center justify-center gap-2">
                           <Loader2 className="size-4 animate-spin text-blue-500" />
@@ -329,6 +340,9 @@ export function RequestLogsPage() {
                         </span>
                       </TableCell>
                       <TableCell className="text-right font-mono text-xs whitespace-nowrap">{record.failed ? "—" : formatTPS(computeTPS(record.output_tokens, record.latency_ms))}</TableCell>
+                      <TableCell className="text-right font-mono text-xs whitespace-nowrap">
+                        {record.failed && !record.estimated_cost_usd ? "—" : formatUSD(record.estimated_cost_usd)}
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
@@ -519,12 +533,13 @@ function ModelFilterCombobox({ placeholder, value, range, onChange }: { placehol
                     [t("requestLogs.table.latency"), formatDuration(data.latency_ms)],
                     [t("requestLogs.table.ttft"), data.ttft_ms > 0 ? formatDuration(data.ttft_ms) : "—"],
                     [t("requestLogs.table.tps"), data.failed ? "—" : formatTPS(computeTPS(data.output_tokens, data.latency_ms))],
+                    [t("requestLogs.detail.cost", "预估价格"), data.failed && !data.estimated_cost_usd ? "—" : formatUSD(data.estimated_cost_usd)],
                     ["Input / Output / Reasoning", `${formatInt(data.input_tokens)} / ${formatInt(data.output_tokens)} / ${formatInt(data.reasoning_tokens)}`],
                     ["Cached", `${formatInt(data.cached_tokens)} · read ${formatInt(data.cache_read_tokens)} · create ${formatInt(data.cache_creation_tokens)} (hit: ${computeCacheHitRate(data)})`],
                     [t("requestLogs.detail.endpoint"), data.endpoint || "—"],
-                    [t("requestLogs.detail.requestedModel", "请求模型"), data.alias ? `${data.alias} (alias)` : (data.model || "—")],
-                    [t("requestLogs.detail.upstreamModel", "实际发送模型"), data.model || "—"],
-                    [t("requestLogs.detail.responseModel"), data.response_model || "—"],
+                    [t("requestLogs.detail.requestedModel", "请求模型"), data.alias?.trim() || data.model?.trim() || "—"],
+                    [t("requestLogs.detail.upstreamModel", "实际模型"), data.model?.trim() || data.alias?.trim() || "—"],
+                    [t("requestLogs.detail.responseModel", "响应模型"), data.response_model?.trim() || "—"],
                     [t("common.provider"), data.provider || "—"],
                     [t("requestLogs.detail.auth"), data.auth_id || data.auth_index ? `${data.auth_id || ""} ${data.auth_index ? `(#${data.auth_index})` : ""}` : "—"],
                     [t("common.apiKey"), data.api_key ? maskKey(data.api_key) : "—"],

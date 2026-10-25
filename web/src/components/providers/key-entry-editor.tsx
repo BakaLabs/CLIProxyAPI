@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FlaskConical, Loader2, Plus } from "lucide-react";
+import { FlaskConical, Loader2, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -170,10 +170,72 @@ export function KeyEntryEditorSheet({
     onSave({ ...clean, models: normalizeModelsForSave(models) });
   };
 
+  const isDirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(entry), [draft, entry]);
+  const confirmingRef = useRef(false);
+
+  const confirmExit = (onConfirm: () => void) => {
+    if (!isDirty) {
+      onConfirm();
+      return;
+    }
+    if (confirmingRef.current) return;
+    confirmingRef.current = true;
+    setTimeout(() => {
+      try {
+        const message = t("providers.unsavedConfirm") || "您有未保存的修改，确定要退出吗？未保存的内容将会丢失。";
+        if (window.confirm(message)) {
+          onConfirm();
+        }
+      } finally {
+        confirmingRef.current = false;
+      }
+    }, 0);
+  };
+
+  useEffect(() => {
+    if (!isDirty) return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty]);
+
   return (
-    <Sheet open onOpenChange={(open) => !open && onClose()}>
-      <SheetContent className="flex w-full flex-col gap-0 sm:max-w-2xl!">
-        <SheetHeader className="border-b pb-4 pr-10">
+    <Sheet
+      open
+      onOpenChange={(open) => {
+        if (!open) {
+          if (!isDirty) onClose();
+        }
+      }}
+    >
+      <SheetContent
+        showCloseButton={false}
+        className="flex w-full flex-col gap-0 sm:max-w-2xl!"
+        onPointerDownOutside={(e) => {
+          e.preventDefault();
+          confirmExit(onClose);
+        }}
+        onInteractOutside={(e) => {
+          e.preventDefault();
+        }}
+        onEscapeKeyDown={(e) => {
+          e.preventDefault();
+          confirmExit(onClose);
+        }}
+      >
+        <SheetHeader className="relative border-b pb-4 pr-10">
+          <Button
+            variant="ghost"
+            className="absolute top-0 right-0 size-8 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+            size="icon"
+            onClick={() => confirmExit(onClose)}
+          >
+            <X className="size-4" />
+            <span className="sr-only">Close</span>
+          </Button>
           <SheetTitle>{isNew ? t("providers.newKeyEntry", { kind: t(`providers.kind.${kind.labelKey}`) }) : t("providers.editKeyEntry", { kind: t(`providers.kind.${kind.labelKey}`) })}</SheetTitle>
           <SheetDescription>{baseURL || t("providers.editHint")}</SheetDescription>
         </SheetHeader>

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/pricing"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/requestdb"
 )
 
@@ -59,6 +60,7 @@ type requestDBRecordResponse struct {
 	CacheReadTokens          int64           `json:"cache_read_tokens"`
 	CacheCreationTokens      int64           `json:"cache_creation_tokens"`
 	TotalTokens              int64           `json:"total_tokens"`
+	EstimatedCostUSD         float64         `json:"estimated_cost_usd"`
 	TokenBreakdown           json.RawMessage `json:"token_breakdown,omitempty"`
 	RequestHeaders           json.RawMessage `json:"request_headers,omitempty"`
 	ResponseHeaders          json.RawMessage `json:"response_headers,omitempty"`
@@ -169,6 +171,14 @@ func newRequestDBRecordResponse(e *requestdb.Entry, withContent bool) requestDBR
 		CacheCreationTokens:      e.CacheCreationTokens,
 		TotalTokens:              e.TotalTokens,
 	}
+	model := e.Model
+	if model == "" {
+		model = e.ResponseModel
+	}
+	if model == "" {
+		model = e.Alias
+	}
+	response.EstimatedCostUSD = pricing.CalculateCost(model, e.InputTokens, e.OutputTokens, e.CacheReadTokens)
 	if !withContent {
 		return response
 	}

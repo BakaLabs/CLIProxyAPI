@@ -44,6 +44,7 @@ export interface RequestRecord {
   cache_read_tokens: number;
   cache_creation_tokens: number;
   total_tokens: number;
+  estimated_cost_usd?: number;
   // Detail-only fields:
   token_breakdown?: unknown;
   request_headers?: Record<string, string>;

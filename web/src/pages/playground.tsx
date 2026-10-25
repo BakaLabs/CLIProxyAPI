@@ -16,6 +16,7 @@ import {
   Pause,
   Pencil,
   Plus,
+  RotateCw,
   Search,
   Sliders,
   Terminal,
@@ -244,11 +245,18 @@ export function PlaygroundPage() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState("");
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const [searchParams] = useSearchParams();
+
+  // Reset message editing when session switches
+  useEffect(() => {
+    setEditingMsgId(null);
+  }, [activeSessionId]);
 
   // Read model from URL params if passed from provider card
   useEffect(() => {
@@ -441,8 +449,56 @@ export function PlaygroundPage() {
     activeSession.messages.find((m) => m.id === inspectorMsgId) ||
     [...activeSession.messages].reverse().find((m) => m.rawRequest || m.rawResponse);
 
-  // Send API Request
-  const handleSend = async (overridePrompt?: string) => {
+  // Message edit and rollback-resend handlers
+  const handleSaveEditOnly = (msgId: string, newContent: string) => {
+    const clean = newContent.trim();
+    if (!clean) {
+      toast.error("消息内容不能为空");
+      return;
+    }
+    updateActiveSessionMessages((prev) =>
+      prev.map((m) => (m.id === msgId ? { ...m, content: clean } : m)),
+    );
+    setEditingMsgId(null);
+    toast.success(t("playground.messageUpdated", "消息内容已更新"));
+  };
+
+  const handleConfirmResend = async (msgId: string, newContent: string) => {
+    const clean = newContent.trim();
+    if (!clean) {
+      toast.error("消息内容不能为空");
+      return;
+    }
+    const index = activeSession.messages.findIndex((m) => m.id === msgId);
+    if (index === -1) return;
+
+    setEditingMsgId(null);
+    void handleSend(clean, index);
+  };
+
+  const handleRegenerate = (assistantMsgId: string) => {
+    const index = activeSession.messages.findIndex((m) => m.id === assistantMsgId);
+    if (index === -1) return;
+    let userMsgIndex = -1;
+    for (let i = index - 1; i >= 0; i--) {
+      const prevMsg = activeSession.messages[i];
+      if (prevMsg && prevMsg.role === "user") {
+        userMsgIndex = i;
+        break;
+      }
+    }
+    const targetMsg = userMsgIndex !== -1 ? activeSession.messages[userMsgIndex] : undefined;
+    if (!targetMsg || !targetMsg.content.trim()) {
+      toast.error("找不到前置用户提示词");
+      return;
+    }
+    const prompt = targetMsg.content;
+    setEditingMsgId(null);
+    void handleSend(prompt, userMsgIndex);
+  };
+
+  // Send API Request (supports regular send, quick prompt, and rollback resend at truncateIndex)
+  const handleSend = async (overridePrompt?: string, truncateIndex?: number) => {
     const textToSend = (overridePrompt ?? input).trim();
     if (!textToSend || loading) return;
 
@@ -456,13 +512,18 @@ export function PlaygroundPage() {
       timestamp: Date.now(),
     };
 
-    if (!overridePrompt) setInput("");
+    if (!overridePrompt && truncateIndex === undefined) setInput("");
     setLoading(true);
 
     const targetModel = selectedModel.trim() || "gpt-4o";
 
+    const baseHistory =
+      truncateIndex !== undefined
+        ? activeSession.messages.slice(0, truncateIndex)
+        : activeSession.messages;
+
     // Assemble OpenAI-standard chat payload, excluding empty or errored entries
-    const validHistory = activeSession.messages
+    const validHistory = baseHistory
       .filter((m) => !m.error && m.content.trim().length > 0 && (m.role === "user" || m.role === "assistant"))
       .map((m) => ({ role: m.role, content: m.content }));
 
@@ -513,7 +574,7 @@ export function PlaygroundPage() {
     };
 
     // Auto-update default session title on first message
-    if (activeSession.messages.length === 0 || activeSession.title.startsWith("接口调试会话 #")) {
+    if (baseHistory.length === 0 || activeSession.title.startsWith("接口调试会话 #")) {
       const summary = textToSend.replace(/\s+/g, " ").trim();
       const newTitle = summary.length > 18 ? `${summary.slice(0, 18)}…` : summary;
       setSessions((currentSessions) =>
@@ -521,7 +582,11 @@ export function PlaygroundPage() {
       );
     }
 
-    updateActiveSessionMessages((prev) => [...prev, userMessage, assistantPlaceholder]);
+    if (truncateIndex !== undefined) {
+      updateActiveSessionMessages(() => [...baseHistory, userMessage, assistantPlaceholder]);
+    } else {
+      updateActiveSessionMessages((prev) => [...prev, userMessage, assistantPlaceholder]);
+    }
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -1021,7 +1086,10 @@ export function PlaygroundPage() {
               variant="ghost"
               size="icon"
               className="size-8 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-              onClick={() => updateActiveSessionMessages(() => [])}
+              onClick={() => {
+                setEditingMsgId(null);
+                updateActiveSessionMessages(() => []);
+              }}
               title={t("playground.clear")}
             >
               <Eraser className="size-3.5" />
@@ -1097,6 +1165,7 @@ export function PlaygroundPage() {
           ) : (
             activeSession.messages.map((msg) => {
               const isUser = msg.role === "user";
+              const isEditing = editingMsgId === msg.id;
               return (
                 <div
                   key={msg.id}
@@ -1115,7 +1184,11 @@ export function PlaygroundPage() {
                   </div>
 
                   {/* Bubble Container */}
-                  <div className={`flex flex-col ${isUser ? "items-end" : "items-start"} max-w-[88%] sm:max-w-[80%]`}>
+                  <div
+                    className={`flex flex-col ${isUser ? "items-end" : "items-start"} max-w-[88%] sm:max-w-[80%] ${
+                      isEditing ? "w-full" : ""
+                    }`}
+                  >
                     {/* Header info */}
                     <div className="mb-1 flex items-center gap-2 px-1 text-[11px] text-slate-400 font-mono">
                       <span className="font-semibold text-slate-700 dark:text-slate-300">
@@ -1137,74 +1210,208 @@ export function PlaygroundPage() {
                       </div>
                     )}
 
-                    {/* Content Bubble */}
-                    <div
-                      className={cn(
-                        "rounded-2xl px-4 py-3 text-xs leading-relaxed shadow-xs transition break-words max-w-full",
-                        isUser
-                          ? "bg-blue-600 text-white selection:bg-blue-800 selection:text-white"
-                          : "border border-slate-200/80 bg-white text-slate-800 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200",
-                      )}
-                    >
-                      {isUser ? (
-                        <p className="whitespace-pre-wrap font-sans">{msg.content}</p>
-                      ) : (
-                        <FormattedContent
-                          content={msg.content || (loading ? "正在连接上游网关并实时接收推理数据..." : "")}
+                    {/* Content Bubble or Inline Editor */}
+                    {isEditing ? (
+                      <div className="w-full min-w-[280px] sm:min-w-[420px] rounded-2xl border border-blue-400 bg-white p-3 shadow-md dark:border-blue-600 dark:bg-slate-900 text-left">
+                        <textarea
+                          value={editingContent}
+                          onChange={(e) => setEditingContent(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") {
+                              e.preventDefault();
+                              setEditingMsgId(null);
+                            } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                              e.preventDefault();
+                              if (isUser) {
+                                void handleConfirmResend(msg.id, editingContent);
+                              } else {
+                                handleSaveEditOnly(msg.id, editingContent);
+                              }
+                            }
+                          }}
+                          rows={Math.min(10, Math.max(3, editingContent.split("\n").length))}
+                          className="w-full resize-y rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs text-slate-800 focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200 font-sans leading-relaxed"
+                          placeholder="输入编辑后的内容..."
+                          autoFocus
                         />
-                      )}
-                    </div>
-
-                    {/* Assistant Metrics Bar */}
-                    {!isUser && msg.metrics && (
-                      <div className="mt-1.5 flex flex-wrap items-center gap-2 px-1 text-[11px] text-slate-400 font-mono">
-                        {msg.metrics.latencyMs !== undefined && (
-                          <span className="flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400">
-                            <Activity className="size-3" />
-                            {formatDuration(msg.metrics.latencyMs)}
+                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-[11px] text-slate-400">
+                            {isUser
+                              ? t("playground.editHint", "Ctrl+Enter 回退重发 · Esc 取消")
+                              : "Ctrl+Enter 保存 · Esc 取消"}
                           </span>
-                        )}
-
-                        {msg.metrics.ttftMs !== undefined && (
-                          <span className="text-slate-500">
-                            TTFT: {msg.metrics.ttftMs}ms
-                          </span>
-                        )}
-
-                        {msg.metrics.tokens && (
-                          <span>
-                            Tokens: {msg.metrics.tokens.input}in / {msg.metrics.tokens.output}out
-                            {msg.metrics.tps ? ` (${formatTPS(msg.metrics.tps)})` : ""}
-                          </span>
-                        )}
-
-                        {/* Copy button */}
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(msg.content, `msg-${msg.id}`)}
-                          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-slate-200 dark:hover:bg-slate-800 transition"
-                          title="复制内容"
-                        >
-                          {copiedKey === `msg-${msg.id}` ? <Check className="size-3 text-emerald-500" /> : <Copy className="size-3" />}
-                          <span>复制</span>
-                        </button>
-
-                        {/* View in Inspector button */}
-                        {Boolean(msg.rawRequest || msg.rawResponse) && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setInspectorMsgId(msg.id);
-                              setRightPanelTab("inspector");
-                            }}
-                            className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/60 transition"
-                            title="在 JSON Inspector 中查看"
-                          >
-                            <Code2 className="size-3" />
-                            <span>Inspect</span>
-                          </button>
-                        )}
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2.5 text-xs"
+                              onClick={() => setEditingMsgId(null)}
+                            >
+                              {t("common.cancel", "取消")}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2.5 text-xs"
+                              onClick={() => handleSaveEditOnly(msg.id, editingContent)}
+                            >
+                              {t("playground.saveOnly", "仅保存")}
+                            </Button>
+                            {isUser && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                disabled={loading}
+                                className="h-7 px-2.5 text-xs bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                                onClick={() => void handleConfirmResend(msg.id, editingContent)}
+                              >
+                                <RotateCw className="mr-1 size-3" />
+                                {t("playground.saveAndResend", "回退重发")}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
                       </div>
+                    ) : (
+                      <>
+                        <div
+                          className={cn(
+                            "rounded-2xl px-4 py-3 text-xs leading-relaxed shadow-xs transition break-words max-w-full",
+                            isUser
+                              ? "bg-blue-600 text-white selection:bg-blue-800 selection:text-white"
+                              : "border border-slate-200/80 bg-white text-slate-800 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200",
+                          )}
+                        >
+                          {isUser ? (
+                            <p className="whitespace-pre-wrap font-sans">{msg.content}</p>
+                          ) : (
+                            <FormattedContent
+                              content={msg.content || (loading ? "正在连接上游网关并实时接收推理数据..." : "")}
+                            />
+                          )}
+                        </div>
+
+                        {/* User Message Action Bar */}
+                        {isUser && (
+                          <div className="mt-1 flex items-center gap-1 px-1 text-[11px] text-slate-400 opacity-80 sm:opacity-0 group-hover:opacity-100 transition">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingMsgId(msg.id);
+                                setEditingContent(msg.content);
+                              }}
+                              disabled={loading}
+                              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-slate-800 transition disabled:opacity-40"
+                              title={t("playground.editMessage", "编辑")}
+                            >
+                              <Pencil className="size-3" />
+                              <span>{t("playground.editMessage", "编辑")}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleCopy(msg.content, `msg-${msg.id}`)}
+                              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800 transition"
+                              title="复制内容"
+                            >
+                              {copiedKey === `msg-${msg.id}` ? (
+                                <Check className="size-3 text-emerald-500" />
+                              ) : (
+                                <Copy className="size-3" />
+                              )}
+                              <span>复制</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Assistant Metrics & Action Bar */}
+                        {!isUser && (
+                          <div className="mt-1.5 flex flex-wrap items-center gap-2 px-1 text-[11px] text-slate-400 font-mono">
+                            {msg.metrics?.latencyMs !== undefined && (
+                              <span className="flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400">
+                                <Activity className="size-3" />
+                                {formatDuration(msg.metrics.latencyMs)}
+                              </span>
+                            )}
+
+                            {msg.metrics?.ttftMs !== undefined && (
+                              <span className="text-slate-500">
+                                TTFT: {msg.metrics.ttftMs}ms
+                              </span>
+                            )}
+
+                            {msg.metrics?.tokens && (
+                              <span>
+                                Tokens: {msg.metrics.tokens.input}in / {msg.metrics.tokens.output}out
+                                {msg.metrics.tps ? ` (${formatTPS(msg.metrics.tps)})` : ""}
+                              </span>
+                            )}
+
+                            {/* Copy button */}
+                            {Boolean(msg.content) && (
+                              <button
+                                type="button"
+                                onClick={() => handleCopy(msg.content, `msg-${msg.id}`)}
+                                className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-slate-200 dark:hover:bg-slate-800 transition"
+                                title="复制内容"
+                              >
+                                {copiedKey === `msg-${msg.id}` ? (
+                                  <Check className="size-3 text-emerald-500" />
+                                ) : (
+                                  <Copy className="size-3" />
+                                )}
+                                <span>复制</span>
+                              </button>
+                            )}
+
+                            {/* Edit assistant message button */}
+                            {Boolean(msg.content) && !loading && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingMsgId(msg.id);
+                                  setEditingContent(msg.content);
+                                }}
+                                className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-slate-200 dark:hover:bg-slate-800 transition"
+                                title={t("playground.editMessage", "编辑")}
+                              >
+                                <Pencil className="size-3" />
+                                <span>{t("playground.editMessage", "编辑")}</span>
+                              </button>
+                            )}
+
+                            {/* Regenerate assistant message button */}
+                            {!loading && (
+                              <button
+                                type="button"
+                                onClick={() => handleRegenerate(msg.id)}
+                                className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:text-blue-400 dark:hover:bg-blue-950/60 transition"
+                                title={t("playground.regenerate", "重新生成")}
+                              >
+                                <RotateCw className="size-3" />
+                                <span>{t("playground.regenerate", "重新生成")}</span>
+                              </button>
+                            )}
+
+                            {/* View in Inspector button */}
+                            {Boolean(msg.rawRequest || msg.rawResponse) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setInspectorMsgId(msg.id);
+                                  setRightPanelTab("inspector");
+                                }}
+                                className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/60 transition"
+                                title="在 JSON Inspector 中查看"
+                              >
+                                <Code2 className="size-3" />
+                                <span>Inspect</span>
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
