@@ -1,5 +1,11 @@
 # CLIProxyAPI
 
+> **Linux 一键安装 / 升级命令**：
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/juzi5201314/CLIProxyAPI/main/install.sh | bash
+> ```
+> *(中国大陆网络加速：`curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/juzi5201314/CLIProxyAPI/main/install.sh | GH_PROXY=https://ghfast.top/ bash`)*
+
 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 的 fork，仅包含以下功能改动：
 
 - 自定义模型不再钳制思考等级：移除配置中按模型声明 `thinking` 能力的覆盖，客户端请求的思考等级原样透传到上游，不再被限制为默认的 low/medium/high。
