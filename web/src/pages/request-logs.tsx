@@ -89,7 +89,7 @@ function ModelChainDisplay({ record }: { record: RequestRecord }) {
   return (
     <div className="flex w-full items-center gap-1 font-mono text-xs min-w-0" title={tooltipLines}>
       <span className="truncate min-w-0 shrink">{requested}</span>
-      {hasAliasDiff && sent ? (
+      {hasAliasDiff && sent && !isUnexpectedResponse ? (
         <>
           <span className="text-muted-foreground/60 shrink-0">→</span>
           <span className="text-muted-foreground truncate min-w-0 shrink">{sent}</span>
