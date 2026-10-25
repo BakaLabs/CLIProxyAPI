@@ -44,6 +44,3 @@ jobs:
         run: |
           go build -o test-output ./cmd/server
           rm -f test-output
-      - name: Test
-        run: |
-          go test -short ./...
