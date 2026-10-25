@@ -46,6 +46,7 @@ func (s *Server) registerManagementV8Routes() {
 	v8.GET("/observability/request-db/timeseries", s.mgmt.GetRequestDBTimeseries)
 	v8.GET("/observability/request-db/breakdown", s.mgmt.GetRequestDBBreakdown)
 	v8.GET("/observability/request-db/stream", s.mgmt.GetRequestDBStream)
+	v8.GET("/observability/model-prices", s.mgmt.GetModelPrices)
 
 	v8.GET("/credentials", s.mgmt.ListAuthFiles)
 	v8.POST("/credentials", s.mgmt.UploadAuthFileV8)

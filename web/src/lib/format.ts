@@ -52,6 +52,16 @@ export function formatPercent(ratio: number | undefined | null, digits = 1): str
   return `${(ratio * 100).toFixed(digits)}%`;
 }
 
+/** Formats USD cost, e.g. "$0.00", "$0.042", "$12.50". */
+export function formatUSD(value: number | undefined | null): string {
+  if (value === undefined || value === null || Number.isNaN(value)) return "—";
+  if (value === 0) return "$0.00";
+  if (value < 0.001) return `< $0.001`;
+  if (value < 0.01) return `$${value.toFixed(4)}`;
+  if (value < 100) return `$${value.toFixed(2)}`;
+  return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 /** Unix milliseconds -> local time; precise=true adds seconds. */
 export function formatTime(ms: number | undefined | null, precise = false): string {
   if (!ms) return "—";

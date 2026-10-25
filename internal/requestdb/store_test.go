@@ -296,3 +296,42 @@ func TestStoreDeleteBefore(t *testing.T) {
 func boolPtr(v bool) *bool {
 	return &v
 }
+
+func TestStoreQueryMultiSelect(t *testing.T) {
+	store, _ := openTestStore(t)
+	ctx := context.Background()
+
+	e1 := sampleEntry("req-1", 1000)
+	e1.Model = "gpt-4o"
+	e1.Provider = "openai"
+
+	e2 := sampleEntry("req-2", 2000)
+	e2.Model = "claude-3-5-sonnet"
+	e2.Provider = "anthropic"
+
+	e3 := sampleEntry("req-3", 3000)
+	e3.Model = "deepseek-chat"
+	e3.Provider = "deepseek"
+
+	if err := store.InsertBatch(ctx, []Entry{e1, e2, e3}); err != nil {
+		t.Fatalf("InsertBatch() error = %v", err)
+	}
+
+	// Test multi-model filter
+	got, err := store.Query(ctx, Query{Models: []string{"gpt-4o", "deepseek-chat"}})
+	if err != nil {
+		t.Fatalf("Query(Models) error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Query(Models) returned %d entries, want 2", len(got))
+	}
+
+	// Test multi-provider filter
+	gotP, err := store.Query(ctx, Query{Providers: []string{"anthropic"}})
+	if err != nil {
+		t.Fatalf("Query(Providers) error = %v", err)
+	}
+	if len(gotP) != 1 || gotP[0].RequestID != "req-2" {
+		t.Fatalf("Query(Providers) returned unexpected result: %v", gotP)
+	}
+}

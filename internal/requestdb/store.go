@@ -78,8 +78,11 @@ type Query struct {
 	FromMS     int64
 	ToMS       int64
 	Model      string
+	Models     []string
 	APIKey     string
+	APIKeys    []string
 	Provider   string
+	Providers  []string
 	SessionID  string
 	RequestID  string
 	TraceID    string
@@ -350,17 +353,37 @@ func buildWhere(q Query) (string, []any) {
 		clauses = append(clauses, "requested_at <= ?")
 		args = append(args, q.ToMS)
 	}
-	// Text filters match by substring so type-as-you go filtering works; LIKE
-	// wildcards inside the input are escaped to match literally.
-	if q.Model != "" {
+	// Multi-select list takes precedence; otherwise fallback to single text filter matching by substring.
+	if len(q.Models) > 0 {
+		placeholders := make([]string, len(q.Models))
+		for i, m := range q.Models {
+			placeholders[i] = "?"
+			args = append(args, m)
+		}
+		clauses = append(clauses, "model IN ("+strings.Join(placeholders, ",")+")")
+	} else if q.Model != "" {
 		clauses = append(clauses, "model LIKE ? ESCAPE '\\'")
 		args = append(args, likeSubstring(q.Model))
 	}
-	if q.APIKey != "" {
+	if len(q.APIKeys) > 0 {
+		placeholders := make([]string, len(q.APIKeys))
+		for i, k := range q.APIKeys {
+			placeholders[i] = "?"
+			args = append(args, k)
+		}
+		clauses = append(clauses, "api_key IN ("+strings.Join(placeholders, ",")+")")
+	} else if q.APIKey != "" {
 		clauses = append(clauses, "api_key LIKE ? ESCAPE '\\'")
 		args = append(args, likeSubstring(q.APIKey))
 	}
-	if q.Provider != "" {
+	if len(q.Providers) > 0 {
+		placeholders := make([]string, len(q.Providers))
+		for i, p := range q.Providers {
+			placeholders[i] = "?"
+			args = append(args, p)
+		}
+		clauses = append(clauses, "provider IN ("+strings.Join(placeholders, ",")+")")
+	} else if q.Provider != "" {
 		clauses = append(clauses, "provider LIKE ? ESCAPE '\\'")
 		args = append(args, likeSubstring(q.Provider))
 	}

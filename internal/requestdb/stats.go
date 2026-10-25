@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
+
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/pricing"
 )
 
 // maxPercentileRows caps the exact percentile scan. Beyond it the latency /
@@ -23,13 +25,14 @@ type Stats struct {
 	FailedRequests int64 `json:"failed_requests"`
 	StreamRequests int64 `json:"stream_requests"`
 
-	InputTokens         int64 `json:"input_tokens"`
-	OutputTokens        int64 `json:"output_tokens"`
-	ReasoningTokens     int64 `json:"reasoning_tokens"`
-	CachedTokens        int64 `json:"cached_tokens"`
-	CacheReadTokens     int64 `json:"cache_read_tokens"`
-	CacheCreationTokens int64 `json:"cache_creation_tokens"`
-	TotalTokens         int64 `json:"total_tokens"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	ReasoningTokens     int64   `json:"reasoning_tokens"`
+	CachedTokens        int64   `json:"cached_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	TotalTokens         int64   `json:"total_tokens"`
+	EstimatedCostUSD    float64 `json:"estimated_cost_usd"`
 
 	UniqueModels    int64 `json:"unique_models"`
 	UniqueProviders int64 `json:"unique_providers"`
@@ -71,14 +74,15 @@ type TPSBucket struct {
 
 // TimeseriesPoint is one interval bucket of the time-series aggregation.
 type TimeseriesPoint struct {
-	BucketMS     int64   `json:"bucket_ms"`
-	Requests     int64   `json:"requests"`
-	Failed       int64   `json:"failed"`
-	InputTokens  int64   `json:"input_tokens"`
-	OutputTokens int64   `json:"output_tokens"`
-	TotalTokens  int64   `json:"total_tokens"`
-	LatencyAvgMS float64 `json:"latency_avg_ms"`
-	TTFTAvgMS    float64 `json:"ttft_avg_ms"`
+	BucketMS         int64   `json:"bucket_ms"`
+	Requests         int64   `json:"requests"`
+	Failed           int64   `json:"failed"`
+	InputTokens      int64   `json:"input_tokens"`
+	OutputTokens     int64   `json:"output_tokens"`
+	TotalTokens      int64   `json:"total_tokens"`
+	EstimatedCostUSD float64 `json:"estimated_cost_usd"`
+	LatencyAvgMS     float64 `json:"latency_avg_ms"`
+	TTFTAvgMS        float64 `json:"ttft_avg_ms"`
 	// TPSAvg is aggregate throughput within the bucket:
 	// SUM(output_tokens) / SUM(latency seconds) over successful rows.
 	TPSAvg float64 `json:"tps_avg"`
@@ -86,14 +90,17 @@ type TimeseriesPoint struct {
 
 // BreakdownRow is one group of the group-by aggregation.
 type BreakdownRow struct {
-	Key          string  `json:"key"`
-	Requests     int64   `json:"requests"`
-	Failed       int64   `json:"failed"`
-	InputTokens  int64   `json:"input_tokens"`
-	OutputTokens int64   `json:"output_tokens"`
-	TotalTokens  int64   `json:"total_tokens"`
-	LatencyAvgMS float64 `json:"latency_avg_ms"`
-	TPSAvg       float64 `json:"tps_avg"`
+	Key              string  `json:"key"`
+	Requests         int64   `json:"requests"`
+	Failed           int64   `json:"failed"`
+	InputTokens      int64   `json:"input_tokens"`
+	OutputTokens     int64   `json:"output_tokens"`
+	ReasoningTokens  int64   `json:"reasoning_tokens"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	TotalTokens      int64   `json:"total_tokens"`
+	EstimatedCostUSD float64 `json:"estimated_cost_usd"`
+	LatencyAvgMS     float64 `json:"latency_avg_ms"`
+	TPSAvg           float64 `json:"tps_avg"`
 }
 
 // breakdownColumns whitelists the group-by dimensions to interpolated SQL
@@ -148,6 +155,21 @@ func (s *Store) Stats(ctx context.Context, q Query) (*Stats, error) {
 	st.TTFTAvgMS = ttftAvg
 	if tpsLatencySum > 0 {
 		st.TPSAvg = tpsOutputSum / (tpsLatencySum / 1000)
+	}
+
+	// Compute estimated USD cost across all models in the filtered range
+	costQuery := `SELECT COALESCE(model,''), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0) FROM request_logs` + where + ` GROUP BY model`
+	if costRows, err := s.db.QueryContext(ctx, costQuery, args...); err == nil {
+		defer func() { _ = costRows.Close() }()
+		var totalCost float64
+		for costRows.Next() {
+			var m string
+			var inTok, outTok, cacheReadTok int64
+			if errScan := costRows.Scan(&m, &inTok, &outTok, &cacheReadTok); errScan == nil {
+				totalCost += pricing.CalculateCost(m, inTok, outTok, cacheReadTok)
+			}
+		}
+		st.EstimatedCostUSD = totalCost
 	}
 
 	if err := s.scanPercentiles(ctx, where, args, st.TotalRequests, &st); err != nil {
@@ -302,6 +324,23 @@ func (s *Store) Timeseries(ctx context.Context, q Query, intervalMS int64) ([]Ti
 	}
 	defer func() { _ = rows.Close() }()
 
+	// Compute cost per interval bucket
+	costStmt := `SELECT (requested_at / ?) * ? AS bucket, COALESCE(model,''),
+		COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0)
+		FROM request_logs` + where + ` GROUP BY bucket, model`
+	costMap := make(map[int64]float64)
+	if costRows, errCost := s.db.QueryContext(ctx, costStmt, allArgs...); errCost == nil {
+		defer func() { _ = costRows.Close() }()
+		for costRows.Next() {
+			var b int64
+			var m string
+			var inTok, outTok, cacheReadTok int64
+			if errScan := costRows.Scan(&b, &m, &inTok, &outTok, &cacheReadTok); errScan == nil {
+				costMap[b] += pricing.CalculateCost(m, inTok, outTok, cacheReadTok)
+			}
+		}
+	}
+
 	var out []TimeseriesPoint
 	for rows.Next() {
 		var p TimeseriesPoint
@@ -314,6 +353,7 @@ func (s *Store) Timeseries(ctx context.Context, q Query, intervalMS int64) ([]Ti
 		if latencySum > 0 {
 			p.TPSAvg = outputSum / (latencySum / 1000)
 		}
+		p.EstimatedCostUSD = costMap[p.BucketMS]
 		out = append(out, p)
 	}
 	if errRows := rows.Err(); errRows != nil {
@@ -342,6 +382,7 @@ func (s *Store) Breakdown(ctx context.Context, q Query, dimension string, limit 
 	where, args := buildWhere(q)
 	stmt := `SELECT ` + column + `, COUNT(*), COALESCE(SUM(failed),0),
 		COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(total_tokens),0),
+		COALESCE(SUM(reasoning_tokens),0), COALESCE(SUM(cache_read_tokens),0),
 		COALESCE(AVG(latency_ms),0),
 		COALESCE(SUM(CASE WHEN failed=0 THEN output_tokens ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN failed=0 THEN latency_ms ELSE 0 END),0)
@@ -359,11 +400,15 @@ func (s *Store) Breakdown(ctx context.Context, q Query, dimension string, limit 
 		var outputSum, latencySum float64
 		if errScan := rows.Scan(&r.Key, &r.Requests, &r.Failed,
 			&r.InputTokens, &r.OutputTokens, &r.TotalTokens,
+			&r.ReasoningTokens, &r.CacheReadTokens,
 			&r.LatencyAvgMS, &outputSum, &latencySum); errScan != nil {
 			return nil, fmt.Errorf("requestdb: scan breakdown row: %w", errScan)
 		}
 		if latencySum > 0 {
 			r.TPSAvg = outputSum / (latencySum / 1000)
+		}
+		if dimension == "model" {
+			r.EstimatedCostUSD = pricing.CalculateCost(r.Key, r.InputTokens, r.OutputTokens, r.CacheReadTokens)
 		}
 		out = append(out, r)
 	}

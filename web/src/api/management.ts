@@ -6,6 +6,7 @@ import type {
   ErrorLogFile,
   LogLinesResponse,
   ModelInfo,
+  ModelPrice,
   OAuthPollStatus,
   OAuthStartResponse,
   PluginInfo,
@@ -22,8 +23,11 @@ import type {
 
 export interface RecordFilter {
   model?: string;
+  models?: string[];
   provider?: string;
+  providers?: string[];
   api_key?: string;
+  api_keys?: string[];
   session_id?: string;
   request_id?: string;
   trace_id?: string;
@@ -38,9 +42,21 @@ export interface RecordFilter {
 
 function filterParams(filter: RecordFilter): Record<string, string> {
   const params: Record<string, string> = {};
-  if (filter.model) params.model = filter.model;
-  if (filter.provider) params.provider = filter.provider;
-  if (filter.api_key) params.api_key = filter.api_key;
+  if (filter.models && filter.models.length > 0) {
+    params.models = filter.models.join(",");
+  } else if (filter.model) {
+    params.model = filter.model;
+  }
+  if (filter.providers && filter.providers.length > 0) {
+    params.providers = filter.providers.join(",");
+  } else if (filter.provider) {
+    params.provider = filter.provider;
+  }
+  if (filter.api_keys && filter.api_keys.length > 0) {
+    params.api_keys = filter.api_keys.join(",");
+  } else if (filter.api_key) {
+    params.api_key = filter.api_key;
+  }
   if (filter.session_id) params.session_id = filter.session_id;
   if (filter.request_id) params.request_id = filter.request_id;
   if (filter.trace_id) params.trace_id = filter.trace_id;
@@ -78,6 +94,10 @@ export const requestDB = {
     params.limit = String(limit);
     const { data } = await client.get("/observability/request-db/breakdown", { params });
     return (data as { rows: BreakdownRow[] }).rows;
+  },
+  async modelPrices(): Promise<{ prices: Record<string, ModelPrice>; count: number }> {
+    const { data } = await client.get("/observability/model-prices");
+    return data as { prices: Record<string, ModelPrice>; count: number };
   },
   streamPath(filter: RecordFilter): string {
     const params = new URLSearchParams();

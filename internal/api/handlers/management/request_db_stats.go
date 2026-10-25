@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/pricing"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/requestdb"
 )
 
@@ -24,8 +25,50 @@ const (
 func parseRequestDBFilter(c *gin.Context) (requestdb.Query, error) {
 	query := requestdb.Query{}
 	query.Model = strings.TrimSpace(c.Query("model"))
+	if rawModels := c.Query("models"); rawModels != "" {
+		for _, m := range strings.Split(rawModels, ",") {
+			if trimmed := strings.TrimSpace(m); trimmed != "" {
+				query.Models = append(query.Models, trimmed)
+			}
+		}
+	} else if arr := c.QueryArray("models[]"); len(arr) > 0 {
+		for _, m := range arr {
+			if trimmed := strings.TrimSpace(m); trimmed != "" {
+				query.Models = append(query.Models, trimmed)
+			}
+		}
+	}
+
 	query.APIKey = strings.TrimSpace(c.Query("api_key"))
+	if rawKeys := c.Query("api_keys"); rawKeys != "" {
+		for _, k := range strings.Split(rawKeys, ",") {
+			if trimmed := strings.TrimSpace(k); trimmed != "" {
+				query.APIKeys = append(query.APIKeys, trimmed)
+			}
+		}
+	} else if arr := c.QueryArray("api_keys[]"); len(arr) > 0 {
+		for _, k := range arr {
+			if trimmed := strings.TrimSpace(k); trimmed != "" {
+				query.APIKeys = append(query.APIKeys, trimmed)
+			}
+		}
+	}
+
 	query.Provider = strings.TrimSpace(c.Query("provider"))
+	if rawProviders := c.Query("providers"); rawProviders != "" {
+		for _, p := range strings.Split(rawProviders, ",") {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				query.Providers = append(query.Providers, trimmed)
+			}
+		}
+	} else if arr := c.QueryArray("providers[]"); len(arr) > 0 {
+		for _, p := range arr {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				query.Providers = append(query.Providers, trimmed)
+			}
+		}
+	}
+
 	query.SessionID = strings.TrimSpace(c.Query("session_id"))
 	query.RequestID = strings.TrimSpace(c.Query("request_id"))
 	query.TraceID = strings.TrimSpace(c.Query("trace_id"))
@@ -235,4 +278,13 @@ func writeSSEEvent(writer gin.ResponseWriter, event string, payload any) bool {
 	}
 	writer.Flush()
 	return true
+}
+
+// GetModelPrices returns the loaded model prices catalog.
+func (h *Handler) GetModelPrices(c *gin.Context) {
+	prices := pricing.Global().GetAllPrices()
+	c.JSON(200, gin.H{
+		"prices": prices,
+		"count":  len(prices),
+	})
 }

@@ -66,6 +66,12 @@ export interface TPSBucket {
   count: number;
 }
 
+export interface ModelPrice {
+  input_cost_per_token: number;
+  output_cost_per_token: number;
+  cache_read_cost_per_token: number;
+}
+
 export interface RequestDBStats {
   total_requests: number;
   failed_requests: number;
@@ -77,6 +83,7 @@ export interface RequestDBStats {
   cache_read_tokens: number;
   cache_creation_tokens: number;
   total_tokens: number;
+  estimated_cost_usd?: number;
   unique_models: number;
   unique_providers: number;
   unique_api_keys: number;
@@ -108,6 +115,7 @@ export interface TimeseriesPoint {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
+  estimated_cost_usd?: number;
   latency_avg_ms: number;
   ttft_avg_ms: number;
   tps_avg: number;
@@ -126,7 +134,10 @@ export interface BreakdownRow {
   failed: number;
   input_tokens: number;
   output_tokens: number;
+  reasoning_tokens?: number;
+  cache_read_tokens?: number;
   total_tokens: number;
+  estimated_cost_usd?: number;
   latency_avg_ms: number;
   tps_avg: number;
 }

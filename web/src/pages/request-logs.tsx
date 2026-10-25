@@ -78,18 +78,18 @@ function ModelChainDisplay({ record }: { record: RequestRecord }) {
   ].filter(Boolean).join("\n");
 
   return (
-    <div className="flex items-center gap-1 font-mono text-xs max-w-64 truncate" title={tooltipLines}>
-      <span className="truncate">{requested}</span>
+    <div className="flex items-center gap-1 font-mono text-xs min-w-0" title={tooltipLines}>
+      <span className="truncate min-w-0 shrink">{requested}</span>
       {hasAliasDiff && sent ? (
         <>
           <span className="text-muted-foreground/60 shrink-0">→</span>
-          <span className="text-muted-foreground truncate">{sent}</span>
+          <span className="text-muted-foreground truncate min-w-0 shrink">{sent}</span>
         </>
       ) : null}
       {hasResponseDiff ? (
         <>
           <span className="text-amber-500 dark:text-amber-400 shrink-0">→</span>
-          <span className="text-amber-600 dark:text-amber-400 font-medium truncate">{response}</span>
+          <span className="text-amber-600 dark:text-amber-400 font-medium truncate min-w-0 shrink">{response}</span>
         </>
       ) : null}
     </div>
@@ -254,19 +254,19 @@ export function RequestLogsPage() {
 
         <div className="card-surface overflow-hidden">
           <div className="max-h-[calc(100vh-16rem)] overflow-auto">
-            <Table>
+            <Table className="min-w-[1100px] table-fixed">
               <TableHeader className="bg-card/95 sticky top-0 z-10 backdrop-blur-sm">
                 <TableRow>
-                  <TableHead className="w-28">{t("requestLogs.table.time")}</TableHead>
+                  <TableHead className="w-32">{t("requestLogs.table.time")}</TableHead>
                   <TableHead className="w-16">{t("requestLogs.table.status")}</TableHead>
-                  <TableHead>{t("requestLogs.table.model")}</TableHead>
-                  <TableHead className="w-24">{t("requestLogs.table.provider")}</TableHead>
+                  <TableHead className="w-auto">{t("requestLogs.table.model")}</TableHead>
+                  <TableHead className="w-36">{t("requestLogs.table.provider")}</TableHead>
                   <TableHead className="w-24">{t("requestLogs.table.tier")}</TableHead>
-                  <TableHead className="w-24">{t("requestLogs.table.thinkingLevel")}</TableHead>
-                  <TableHead className="text-right">{t("requestLogs.table.tokens")}</TableHead>
-                  <TableHead className="text-right w-20">{t("requestLogs.table.ttft")}</TableHead>
-                  <TableHead className="text-right w-20">{t("requestLogs.table.latency")}</TableHead>
-                  <TableHead className="text-right w-16">{t("requestLogs.table.tps")}</TableHead>
+                  <TableHead className="w-28">{t("requestLogs.table.thinkingLevel")}</TableHead>
+                  <TableHead className="w-52 text-right">{t("requestLogs.table.tokens")}</TableHead>
+                  <TableHead className="w-20 text-right">{t("requestLogs.table.ttft")}</TableHead>
+                  <TableHead className="w-20 text-right">{t("requestLogs.table.latency")}</TableHead>
+                  <TableHead className="w-20 text-right">{t("requestLogs.table.tps")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -297,18 +297,18 @@ export function RequestLogsPage() {
                           responsePreview={record.response_preview}
                         />
                       </TableCell>
-                      <TableCell className="max-w-64">
+                      <TableCell className="overflow-hidden">
                         <ModelChainDisplay record={record} />
                       </TableCell>
-                      <TableCell className="text-xs truncate max-w-24">{record.provider || "—"}</TableCell>
-                      <TableCell className="max-w-24 truncate font-mono text-xs" title={record.effective_service_tier || record.service_tier || record.response_service_tier || ""}>
+                      <TableCell className="text-xs truncate" title={record.provider || ""}>{record.provider || "—"}</TableCell>
+                      <TableCell className="truncate font-mono text-xs" title={record.effective_service_tier || record.service_tier || record.response_service_tier || ""}>
                         {record.effective_service_tier || record.service_tier || record.response_service_tier ? (
                           <span className="text-foreground">{record.effective_service_tier || record.service_tier || record.response_service_tier}</span>
                         ) : (
                           <span className="text-muted-foreground">—</span>
                         )}
                       </TableCell>
-                      <TableCell className="max-w-24 truncate font-mono text-xs" title={record.reasoning_effort || record.requested_reasoning_effort || ""}>
+                      <TableCell className="truncate font-mono text-xs" title={record.reasoning_effort || record.requested_reasoning_effort || ""}>
                         {record.reasoning_effort || record.requested_reasoning_effort ? (
                           <span className="text-foreground">{record.reasoning_effort || record.requested_reasoning_effort}</span>
                         ) : (

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type TimeRangePreset = "1h" | "6h" | "24h" | "7d" | "30d" | "custom";
+export type TimeRangePreset = "1h" | "6h" | "24h" | "today" | "yesterday" | "7d" | "30d" | "thisMonth" | "lastMonth" | "custom";
 
 export interface TimeRange {
   preset: TimeRangePreset;
@@ -61,11 +61,30 @@ export const usePrefsStore = create<PrefsState>((set) => ({
 
 /** Resolve a range preset into absolute unix-ms bounds. */
 export function resolveRange(range: TimeRange, now = Date.now()): { from: number; to: number } {
+  const nowDate = new Date(now);
   switch (range.preset) {
     case "1h":
       return { from: now - 3_600_000, to: now };
     case "6h":
       return { from: now - 6 * 3_600_000, to: now };
+    case "today": {
+      const startOfToday = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
+      return { from: startOfToday, to: now };
+    }
+    case "yesterday": {
+      const startOfYesterday = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() - 1).getTime();
+      const endOfYesterday = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate(), 0, 0, 0, -1).getTime();
+      return { from: startOfYesterday, to: endOfYesterday };
+    }
+    case "thisMonth": {
+      const startOfMonth = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1).getTime();
+      return { from: startOfMonth, to: now };
+    }
+    case "lastMonth": {
+      const startOfLastMonth = new Date(nowDate.getFullYear(), nowDate.getMonth() - 1, 1).getTime();
+      const endOfLastMonth = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1, 0, 0, 0, -1).getTime();
+      return { from: startOfLastMonth, to: endOfLastMonth };
+    }
     case "7d":
       return { from: now - 7 * 86_400_000, to: now };
     case "30d":

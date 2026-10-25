@@ -8,7 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import type { TimeRange, TimeRangePreset } from "@/stores/prefs";
 import { resolveRange } from "@/stores/prefs";
 
-const PRESETS: TimeRangePreset[] = ["1h", "6h", "24h", "7d", "30d"];
+const PRESETS: TimeRangePreset[] = ["24h", "today", "yesterday", "7d", "30d", "thisMonth"];
 
 interface TimeRangeSelectProps {
   value: TimeRange;
