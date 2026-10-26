@@ -21,7 +21,7 @@ import { TimeRangeSelect } from "@/components/shared/time-range-select";
 import { requestDB, fileLogs, type RecordFilter } from "@/api/management";
 import { errMessage, errStatus, type RequestRecord } from "@/api/types";
 import { useLiveRecords } from "@/hooks/use-live-records";
-import { computeCacheHitRate, computeTPS, dayjs, downloadText, formatDuration, formatInt, formatLatencySeconds, formatNumber, formatTPS, formatTime, formatUSD, getLatencyColorClass, getTTFTColorClass, maskKey, resolveTotalInputTokens, toCSV } from "@/lib/format";
+import { computeCacheHitRate, computeTPS, dayjs, downloadText, extractHost, formatDuration, formatInt, formatLatencySeconds, formatNumber, formatTPS, formatTime, formatUSD, getLatencyColorClass, getTTFTColorClass, maskKey, resolveTotalInputTokens, toCSV } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { usePrefsStore, resolveRange, type TimeRange } from "@/stores/prefs";
 
@@ -106,6 +106,54 @@ function ModelChainDisplay({ record }: { record: RequestRecord }) {
   );
 }
 
+function ProviderDisplay({ record }: { record: RequestRecord }) {
+  const host = extractHost(record.base_url);
+  const provider = record.provider?.trim();
+
+  if (!provider && !host) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+
+  const fullTitle = record.base_url
+    ? `${provider || "—"} (${record.base_url})`
+    : (provider || "—");
+
+  return (
+    <span className="font-mono text-xs truncate block max-w-full" title={fullTitle}>
+      <span className="text-foreground">{provider || "—"}</span>
+      {host ? <span className="text-muted-foreground/80 font-normal">({host})</span> : null}
+    </span>
+  );
+}
+
+function ThinkingLevelDisplay({ record }: { record: RequestRecord }) {
+  const { t } = useTranslation();
+  const requested = record.requested_reasoning_effort?.trim();
+  const actual = record.reasoning_effort?.trim();
+
+  if (!requested && !actual) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+
+  if (requested && actual && requested !== actual) {
+    const tooltip = `${t("requestLogs.detail.requestedReasoning", "请求思考等级")}: ${requested}\n${t("requestLogs.detail.actualReasoning", "实际响应等级")}: ${actual}`;
+    return (
+      <div className="flex w-full items-center gap-1 font-mono text-xs min-w-0" title={tooltip}>
+        <span className="truncate min-w-0 shrink text-foreground">{requested}</span>
+        <span className="text-muted-foreground/60 shrink-0">→</span>
+        <span className="text-muted-foreground truncate min-w-0 shrink">{actual}</span>
+      </div>
+    );
+  }
+
+  const level = actual || requested;
+  return (
+    <span className="font-mono text-xs text-foreground truncate block max-w-full" title={level}>
+      {level}
+    </span>
+  );
+}
+
 function TokenMetricCell({ record }: { record: RequestRecord }) {
   const totalInput = resolveTotalInputTokens(record);
   const cachePct = computeCacheHitRate(record);
@@ -155,25 +203,34 @@ export function RequestLogsPage() {
   };
 
   const exportCSV = () => {
-    const rows = liveState.records.map((record) => [
-      dayjs(record.requested_at).format("YYYY-MM-DD HH:mm:ss"),
-      record.failed ? record.status_code : 200,
-      record.alias ? `${record.alias} -> ${record.model}` : (record.model ?? ""),
-      record.response_model ?? "",
-      record.provider ?? "",
-      record.effective_service_tier || record.service_tier || "",
-      record.reasoning_effort || record.requested_reasoning_effort || "",
-      record.api_key ?? "",
-      resolveTotalInputTokens(record),
-      record.output_tokens,
-      record.reasoning_tokens,
-      computeCacheHitRate(record),
-      record.total_tokens,
-      record.latency_ms,
-      record.ttft_ms,
-      computeTPS(record.output_tokens, record.latency_ms).toFixed(2),
-      record.estimated_cost_usd !== undefined ? record.estimated_cost_usd.toFixed(4) : "",
-    ]);
+    const rows = liveState.records.map((record) => {
+      const host = extractHost(record.base_url);
+      const provider = record.provider ? (host ? `${record.provider}(${host})` : record.provider) : "";
+      const reqEffort = record.requested_reasoning_effort?.trim();
+      const actEffort = record.reasoning_effort?.trim();
+      const thinkingLevel = reqEffort && actEffort && reqEffort !== actEffort
+        ? `${reqEffort} -> ${actEffort}`
+        : (actEffort || reqEffort || "");
+      return [
+        dayjs(record.requested_at).format("YYYY-MM-DD HH:mm:ss"),
+        record.failed ? record.status_code : 200,
+        record.alias ? `${record.alias} -> ${record.model}` : (record.model ?? ""),
+        record.response_model ?? "",
+        provider,
+        record.effective_service_tier || record.service_tier || "",
+        thinkingLevel,
+        record.api_key ?? "",
+        resolveTotalInputTokens(record),
+        record.output_tokens,
+        record.reasoning_tokens,
+        computeCacheHitRate(record),
+        record.total_tokens,
+        record.latency_ms,
+        record.ttft_ms,
+        computeTPS(record.output_tokens, record.latency_ms).toFixed(2),
+        record.estimated_cost_usd !== undefined ? record.estimated_cost_usd.toFixed(4) : "",
+      ];
+    });
     downloadText(
       `cpa-request-logs.csv`,
       toCSV([t("common.time"), "status", t("common.model"), "response_model", t("common.provider"), "tier", "thinking_level", t("common.apiKey"), "input", "output", "reasoning", "cache_hit_rate", "total", "latency_ms", "ttft_ms", "tps", "cost_usd"], rows),
@@ -272,15 +329,15 @@ export function RequestLogsPage() {
 
         <div className="card-surface overflow-hidden">
           <div className="max-h-[calc(100vh-16rem)] overflow-auto">
-            <Table className="min-w-[1180px] table-fixed">
+            <Table className="min-w-[1240px] table-fixed">
               <TableHeader className="bg-card/95 sticky top-0 z-10 backdrop-blur-sm">
                 <TableRow>
                   <TableHead className="w-32">{t("requestLogs.table.time")}</TableHead>
                   <TableHead className="w-16">{t("requestLogs.table.status")}</TableHead>
                   <TableHead className="w-auto">{t("requestLogs.table.model")}</TableHead>
-                  <TableHead className="w-36">{t("requestLogs.table.provider")}</TableHead>
+                  <TableHead className="w-44">{t("requestLogs.table.provider")}</TableHead>
                   <TableHead className="w-24">{t("requestLogs.table.tier")}</TableHead>
-                  <TableHead className="w-28">{t("requestLogs.table.thinkingLevel")}</TableHead>
+                  <TableHead className="w-32">{t("requestLogs.table.thinkingLevel")}</TableHead>
                   <TableHead className="w-52 text-right">{t("requestLogs.table.tokens")}</TableHead>
                   <TableHead className="w-20 text-right">{t("requestLogs.table.ttft")}</TableHead>
                   <TableHead className="w-20 text-right">{t("requestLogs.table.latency")}</TableHead>
@@ -319,7 +376,9 @@ export function RequestLogsPage() {
                       <TableCell className="overflow-hidden">
                         <ModelChainDisplay record={record} />
                       </TableCell>
-                      <TableCell className="text-xs truncate" title={record.provider || ""}>{record.provider || "—"}</TableCell>
+                      <TableCell className="text-xs overflow-hidden">
+                        <ProviderDisplay record={record} />
+                      </TableCell>
                       <TableCell className="truncate font-mono text-xs" title={record.effective_service_tier || record.service_tier || record.response_service_tier || ""}>
                         {record.effective_service_tier || record.service_tier || record.response_service_tier ? (
                           <span className="text-foreground">{record.effective_service_tier || record.service_tier || record.response_service_tier}</span>
@@ -327,12 +386,8 @@ export function RequestLogsPage() {
                           <span className="text-muted-foreground">—</span>
                         )}
                       </TableCell>
-                      <TableCell className="truncate font-mono text-xs" title={record.reasoning_effort || record.requested_reasoning_effort || ""}>
-                        {record.reasoning_effort || record.requested_reasoning_effort ? (
-                          <span className="text-foreground">{record.reasoning_effort || record.requested_reasoning_effort}</span>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
+                      <TableCell className="overflow-hidden">
+                        <ThinkingLevelDisplay record={record} />
                       </TableCell>
                       <TableCell className="text-right font-mono text-xs whitespace-nowrap">
                         <TokenMetricCell record={record} />
@@ -554,7 +609,10 @@ function ModelFilterCombobox({ placeholder, value, range, onChange }: { placehol
                     [t("requestLogs.detail.requestedModel", "请求模型"), data.alias?.trim() || data.model?.trim() || "—"],
                     [t("requestLogs.detail.upstreamModel", "实际模型"), data.model?.trim() || data.alias?.trim() || "—"],
                     [t("requestLogs.detail.responseModel", "响应模型"), data.response_model?.trim() || "—"],
-                    [t("common.provider"), data.provider || "—"],
+                    [t("common.provider"), (() => {
+                      const host = extractHost(data.base_url);
+                      return data.provider ? (host ? `${data.provider}(${host})` : data.provider) : "—";
+                    })()],
                     [t("requestLogs.detail.auth"), data.auth_id || data.auth_index ? `${data.auth_id || ""} ${data.auth_index ? `(#${data.auth_index})` : ""}` : "—"],
                     [t("common.apiKey"), data.api_key ? maskKey(data.api_key) : "—"],
                     [t("requestLogs.detail.baseUrl"), data.base_url || "—"],
@@ -562,7 +620,14 @@ function ModelFilterCombobox({ placeholder, value, range, onChange }: { placehol
                     [t("requestLogs.detail.clientIp"), data.client_ip || "—"],
                     [t("requestLogs.detail.userAgent"), data.user_agent || "—"],
                     [t("requestLogs.detail.tier"), data.effective_service_tier || data.service_tier || "—"],
-                    [t("requestLogs.detail.reasoning"), data.reasoning_effort || data.requested_reasoning_effort || "—"],
+                    [t("requestLogs.detail.reasoning"), (() => {
+                      const req = data.requested_reasoning_effort?.trim();
+                      const act = data.reasoning_effort?.trim();
+                      if (req && act && req !== act) {
+                        return `${req} → ${act}`;
+                      }
+                      return act || req || "—";
+                    })()],
                     ["Stream", String(data.stream)],
                   ]}
                 />

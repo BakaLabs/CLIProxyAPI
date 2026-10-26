@@ -85,6 +85,25 @@ export function maskKey(key: string | undefined | null): string {
   return `${key.slice(0, 4)}…${key.slice(-4)}`;
 }
 
+/**
+ * Extracts host (hostname or hostname:port) from a URL or address string.
+ * e.g. "https://api.example.com/v1" -> "api.example.com"
+ *      "http://localhost:8080" -> "localhost:8080"
+ */
+export function extractHost(urlStr?: string | null): string {
+  if (!urlStr || !urlStr.trim()) return "";
+  const raw = urlStr.trim();
+  try {
+    const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw);
+    const parsed = new URL(hasScheme ? raw : `http://${raw}`);
+    return parsed.host;
+  } catch {
+    const withoutScheme = raw.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, "");
+    const firstSegment = withoutScheme.split("/")[0] ?? "";
+    return (firstSegment.split("?")[0] ?? "").trim();
+  }
+}
+
 export function formatBytes(bytes: number | undefined | null): string {
   if (bytes === undefined || bytes === null || Number.isNaN(bytes)) return "—";
   if (bytes < 1024) return `${bytes} B`;
