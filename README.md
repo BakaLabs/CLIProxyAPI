@@ -42,11 +42,6 @@
 curl -fsSL https://raw.githubusercontent.com/juzi5201314/CLIProxyAPI/main/install.sh | bash
 ```
 
-中国大陆网络可使用加速镜像：
-```bash
-curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/juzi5201314/CLIProxyAPI/main/install.sh | GH_PROXY=https://ghfast.top/ bash
-```
-
 常用管理命令：
 ```bash
 ~/cliproxyapi/install.sh status        # 查看服务状态与运行端口
