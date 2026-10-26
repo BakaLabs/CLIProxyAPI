@@ -376,6 +376,21 @@ func TestStoreQueryMultiSelect(t *testing.T) {
 		t.Fatalf("Query(Models) returned %d entries, want 2", len(got))
 	}
 
+	// Test multi-model filter by response_model
+	e1WithResp := sampleEntry("req-resp", 4000)
+	e1WithResp.Model = "requested-model"
+	e1WithResp.ResponseModel = "upstream-response-model"
+	if err := store.InsertBatch(ctx, []Entry{e1WithResp}); err != nil {
+		t.Fatalf("InsertBatch() error = %v", err)
+	}
+	gotResp, err := store.Query(ctx, Query{Models: []string{"upstream-response-model"}})
+	if err != nil {
+		t.Fatalf("Query(Models response) error = %v", err)
+	}
+	if len(gotResp) != 1 || gotResp[0].RequestID != "req-resp" {
+		t.Fatalf("Query(Models response) returned %v, want [req-resp]", gotResp)
+	}
+
 	// Test multi-provider filter
 	gotP, err := store.Query(ctx, Query{Providers: []string{"anthropic"}})
 	if err != nil {

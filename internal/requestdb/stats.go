@@ -105,9 +105,10 @@ type BreakdownRow struct {
 
 // breakdownColumns whitelists the group-by dimensions to interpolated SQL
 // expressions. status_code is only meaningful on failures (success rows are
-// stored as 200).
+// stored as 200). Model groups by the upstream response_model when reported,
+// falling back to the requested model.
 var breakdownColumns = map[string]string{
-	"model":       "model",
+	"model":       "COALESCE(NULLIF(response_model, ''), model)",
 	"provider":    "provider",
 	"api_key":     "api_key",
 	"auth_id":     "auth_id",
@@ -127,7 +128,7 @@ func (s *Store) Stats(ctx context.Context, q Query) (*Stats, error) {
 		COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(reasoning_tokens),0),
 		COALESCE(SUM(cached_tokens),0), COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_creation_tokens),0),
 		COALESCE(SUM(total_tokens),0),
-		COUNT(DISTINCT NULLIF(model,'')), COUNT(DISTINCT NULLIF(provider,'')),
+		COUNT(DISTINCT NULLIF(COALESCE(NULLIF(response_model, ''), model),'')), COUNT(DISTINCT NULLIF(provider,'')),
 		COUNT(DISTINCT NULLIF(api_key,'')), COUNT(DISTINCT NULLIF(session_id,'')),
 		COALESCE(MIN(requested_at),0), COALESCE(MAX(requested_at),0),
 		COALESCE(AVG(latency_ms),0),
@@ -158,7 +159,7 @@ func (s *Store) Stats(ctx context.Context, q Query) (*Stats, error) {
 	}
 
 	// Compute estimated USD cost across all models in the filtered range
-	costQuery := `SELECT COALESCE(model,''), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0) FROM request_logs` + where + ` GROUP BY model`
+	costQuery := `SELECT COALESCE(NULLIF(response_model, ''), model, ''), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0) FROM request_logs` + where + ` GROUP BY COALESCE(NULLIF(response_model, ''), model)`
 	if costRows, err := s.db.QueryContext(ctx, costQuery, args...); err == nil {
 		defer func() { _ = costRows.Close() }()
 		var totalCost float64
@@ -325,9 +326,9 @@ func (s *Store) Timeseries(ctx context.Context, q Query, intervalMS int64) ([]Ti
 	defer func() { _ = rows.Close() }()
 
 	// Compute cost per interval bucket
-	costStmt := `SELECT (requested_at / ?) * ? AS bucket, COALESCE(model,''),
+	costStmt := `SELECT (requested_at / ?) * ? AS bucket, COALESCE(NULLIF(response_model, ''), model, ''),
 		COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0)
-		FROM request_logs` + where + ` GROUP BY bucket, model`
+		FROM request_logs` + where + ` GROUP BY bucket, COALESCE(NULLIF(response_model, ''), model)`
 	costMap := make(map[int64]float64)
 	if costRows, errCost := s.db.QueryContext(ctx, costStmt, allArgs...); errCost == nil {
 		defer func() { _ = costRows.Close() }()

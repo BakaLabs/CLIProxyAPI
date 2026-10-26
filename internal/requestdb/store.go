@@ -577,7 +577,11 @@ func buildWhere(q Query) (string, []any) {
 			placeholders[i] = "?"
 			args = append(args, m)
 		}
-		clauses = append(clauses, "model IN ("+strings.Join(placeholders, ",")+")")
+		inList := strings.Join(placeholders, ",")
+		clauses = append(clauses, "(COALESCE(NULLIF(response_model, ''), model) IN ("+inList+") OR model IN ("+inList+"))")
+		for _, m := range q.Models {
+			args = append(args, m)
+		}
 	} else if q.Model != "" {
 		clauses = append(clauses, "model LIKE ? ESCAPE '\\'")
 		args = append(args, likeSubstring(q.Model))

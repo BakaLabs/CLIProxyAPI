@@ -817,18 +817,14 @@ function ComprehensiveBreakdownTable({
                                 ? "外部来源未收录或单价为 0，点击手动设置价格"
                                 : "点击调整该模型单价"
                             }
-                            className={`cursor-pointer inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-sans font-normal transition-all ${
+                            aria-label={t("dashboard.pricing.configurePrice", "设置价格")}
+                            className={`cursor-pointer inline-flex items-center justify-center rounded p-1 text-[10px] font-sans font-normal transition-all ${
                               (row.estimated_cost_usd ?? 0) === 0
                                 ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 font-medium shadow-2xs"
                                 : "text-muted-foreground/60 hover:text-primary hover:bg-primary/10"
                             }`}
                           >
-                            <Coins className="size-2.5" />
-                            <span>
-                              {(row.estimated_cost_usd ?? 0) === 0
-                                ? t("dashboard.pricing.notPriced", "未定价")
-                                : t("dashboard.pricing.configurePrice", "设置价格")}
-                            </span>
+                            <Coins className="size-3" />
                           </button>
                         )}
                       </div>

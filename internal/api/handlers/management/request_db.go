@@ -180,9 +180,9 @@ func newRequestDBRecordResponse(e *requestdb.Entry, withContent bool) requestDBR
 		CacheCreationTokens:      e.CacheCreationTokens,
 		TotalTokens:              totalTokens,
 	}
-	model := e.Model
+	model := e.ResponseModel
 	if model == "" {
-		model = e.ResponseModel
+		model = e.Model
 	}
 	if model == "" {
 		model = e.Alias
