@@ -83,6 +83,18 @@ export function useLiveRecords(filter: RecordFilter): LiveRecordsState {
 
     const controller = new AbortController();
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    const buffer: RequestRecord[] = [];
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleFlush = () => {
+      if (flushTimer !== null) return;
+      flushTimer = setTimeout(() => {
+        flushTimer = null;
+        if (buffer.length === 0) return;
+        const incoming = buffer.splice(0, buffer.length);
+        setRecords((previous) => [...incoming, ...previous].slice(0, MAX_RECORDS));
+      }, 150);
+    };
 
     const push = (record: RequestRecord) => {
       if (isSeen(seen.current, record)) return;
@@ -92,7 +104,8 @@ export function useLiveRecords(filter: RecordFilter): LiveRecordsState {
         setPending(pendingRef.current.length);
         return;
       }
-      setRecords((previous) => [record, ...previous].slice(0, MAX_RECORDS));
+      buffer.unshift(record);
+      scheduleFlush();
     };
 
     const attach = async () => {
@@ -128,6 +141,7 @@ export function useLiveRecords(filter: RecordFilter): LiveRecordsState {
 
     void attach();
     return () => {
+      if (flushTimer) clearTimeout(flushTimer);
       controller.abort();
       if (reconnectTimer) clearTimeout(reconnectTimer);
     };

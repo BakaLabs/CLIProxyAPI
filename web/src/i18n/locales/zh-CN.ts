@@ -26,6 +26,7 @@ const zhCN = {
     quickSearch: "快速搜索 (⌘K)",
     gatewayOnline: "网关正常运行",
     consoleSubtitle: "智能网关控制台",
+    realtimeInspector: "实时测控面板",
     short: {
       dashboard: "监控",
       providers: "供应商",

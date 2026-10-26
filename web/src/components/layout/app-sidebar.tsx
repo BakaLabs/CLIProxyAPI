@@ -30,6 +30,8 @@ import { cn } from "@/lib/utils";
 
 interface AppSidebarProps {
   onOpenSearch: () => void;
+  mobile?: boolean;
+  onNavigate?: () => void;
 }
 
 interface NavItem {
@@ -46,12 +48,13 @@ interface NavGroup {
   items: NavItem[];
 }
 
-export function AppSidebar({ onOpenSearch }: AppSidebarProps) {
+export function AppSidebar({ onOpenSearch, mobile, onNavigate }: AppSidebarProps) {
   const { t } = useTranslation();
   const clear = useAuthStore((state) => state.clear);
   const location = useLocation();
   const collapsed = usePrefsStore((state) => state.sidebarCollapsed);
   const toggleSidebar = usePrefsStore((state) => state.toggleSidebar);
+  const isCollapsed = mobile ? false : collapsed;
 
   const pluginsQuery = useQuery({
     queryKey: ["plugins"],
@@ -151,8 +154,10 @@ export function AppSidebar({ onOpenSearch }: AppSidebarProps) {
   return (
     <aside
       className={cn(
-        "hidden md:flex flex-col justify-between shrink-0 border-r border-slate-200/80 bg-white/95 backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/95 z-40 select-none transition-all duration-300 ease-in-out",
-        collapsed ? "w-[68px]" : "w-60 lg:w-64",
+        mobile
+          ? "flex flex-col justify-between h-full w-full bg-white dark:bg-slate-900 z-40 select-none"
+          : "hidden md:flex flex-col justify-between shrink-0 border-r border-slate-200/80 bg-white/95 backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/95 z-40 select-none transition-all duration-300 ease-in-out",
+        !mobile && (isCollapsed ? "w-[68px]" : "w-60 lg:w-64"),
       )}
     >
       {/* Top Brand & Sidebar Toggle */}
@@ -160,10 +165,10 @@ export function AppSidebar({ onOpenSearch }: AppSidebarProps) {
         <div
           className={cn(
             "flex items-center h-14 border-b border-slate-100 dark:border-slate-800/60 px-3.5",
-            collapsed ? "justify-center" : "justify-between",
+            isCollapsed ? "justify-center" : "justify-between",
           )}
         >
-          {collapsed ? (
+          {isCollapsed ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -175,7 +180,7 @@ export function AppSidebar({ onOpenSearch }: AppSidebarProps) {
                 </button>
               </TooltipTrigger>
               <TooltipContent side="right" className="font-semibold text-xs">
-                展开侧边栏
+                {t("nav.expandSidebar", "展开侧边栏")}
               </TooltipContent>
             </Tooltip>
           ) : (
@@ -187,25 +192,27 @@ export function AppSidebar({ onOpenSearch }: AppSidebarProps) {
                     CLIProxyAPI
                   </span>
                   <span className="text-[10px] text-slate-400 font-medium leading-none truncate">
-                    智能网关控制台
+                    {t("nav.consoleSubtitle", "智能网关控制台")}
                   </span>
                 </div>
               </div>
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={toggleSidebar}
-                    className="flex size-7 items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:text-slate-300 dark:hover:bg-slate-800 transition"
-                  >
-                    <PanelLeftClose className="size-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" className="text-xs">
-                  折叠侧栏
-                </TooltipContent>
-              </Tooltip>
+              {!mobile && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={toggleSidebar}
+                      className="flex size-7 items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:text-slate-300 dark:hover:bg-slate-800 transition"
+                    >
+                      <PanelLeftClose className="size-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="text-xs">
+                    {t("nav.collapseSidebar", "折叠侧栏")}
+                  </TooltipContent>
+                </Tooltip>
+              )}
             </>
           )}
         </div>
@@ -253,12 +260,13 @@ export function AppSidebar({ onOpenSearch }: AppSidebarProps) {
                   );
                 };
 
-                if (collapsed) {
+                if (isCollapsed) {
                   return (
                     <Tooltip key={item.to}>
                       <TooltipTrigger asChild>
                         <NavLink
                           to={item.to}
+                          onClick={() => onNavigate?.()}
                           className={cn(
                             "group flex items-center justify-center size-10 mx-auto rounded-xl transition-all duration-200",
                             active
@@ -280,6 +288,7 @@ export function AppSidebar({ onOpenSearch }: AppSidebarProps) {
                   <NavLink
                     key={item.to}
                     to={item.to}
+                    onClick={() => onNavigate?.()}
                     className={cn(
                       "group flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition-all duration-150",
                       active
@@ -299,7 +308,7 @@ export function AppSidebar({ onOpenSearch }: AppSidebarProps) {
 
       {/* Bottom Actions: Search, Expand Button if collapsed, Logout */}
       <div className="border-t border-slate-100 dark:border-slate-800/60 p-2.5 space-y-1 shrink-0">
-        {collapsed ? (
+        {isCollapsed ? (
           <div className="flex flex-col items-center gap-1.5">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -312,7 +321,7 @@ export function AppSidebar({ onOpenSearch }: AppSidebarProps) {
                 </button>
               </TooltipTrigger>
               <TooltipContent side="right" className="text-xs">
-                展开侧栏
+                {t("nav.expandSidebar", "展开侧栏")}
               </TooltipContent>
             </Tooltip>
 
@@ -320,14 +329,17 @@ export function AppSidebar({ onOpenSearch }: AppSidebarProps) {
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={onOpenSearch}
+                  onClick={() => {
+                    onOpenSearch();
+                    onNavigate?.();
+                  }}
                   className="flex size-9 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 transition"
                 >
                   <Search className="size-4" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="right" className="text-xs">
-                快速搜索 (⌘K)
+                {t("nav.quickSearch", "快速搜索 (⌘K)")}
               </TooltipContent>
             </Tooltip>
 
@@ -335,7 +347,10 @@ export function AppSidebar({ onOpenSearch }: AppSidebarProps) {
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={clear}
+                  onClick={() => {
+                    clear();
+                    onNavigate?.();
+                  }}
                   className="flex size-9 items-center justify-center rounded-xl text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
                 >
                   <LogOut className="size-4" />
@@ -350,12 +365,15 @@ export function AppSidebar({ onOpenSearch }: AppSidebarProps) {
           <div className="space-y-1">
             <button
               type="button"
-              onClick={onOpenSearch}
+              onClick={() => {
+                onOpenSearch();
+                onNavigate?.();
+              }}
               className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 transition"
             >
               <div className="flex items-center gap-2">
                 <Search className="size-3.5 text-slate-400" />
-                <span>快速搜索</span>
+                <span>{t("nav.quickSearch", "快速搜索 (⌘K)")}</span>
               </div>
               <kbd className="pointer-events-none inline-flex h-4 select-none items-center rounded border border-slate-200 bg-white px-1 font-mono text-[9px] font-medium text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
                 ⌘K
@@ -364,7 +382,10 @@ export function AppSidebar({ onOpenSearch }: AppSidebarProps) {
 
             <button
               type="button"
-              onClick={clear}
+              onClick={() => {
+                clear();
+                onNavigate?.();
+              }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:text-rose-400 dark:hover:bg-rose-950/30 transition"
             >
               <LogOut className="size-3.5" />

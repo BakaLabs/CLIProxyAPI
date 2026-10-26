@@ -52,6 +52,7 @@ export function QuotaPage() {
   const quotaEntries = useMemo(() => (files.data?.files ?? []).filter((entry) => entry.supports_quota), [files.data]);
   const [results, setResults] = useState<Record<string, QuotaResult>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
+  const [batchLoading, setBatchLoading] = useState(false);
 
   const loadOne = async (entry: AuthFileEntry) => {
     const key = entry.auth_index || entry.id;
@@ -71,17 +72,41 @@ export function QuotaPage() {
   };
 
   const loadAll = async () => {
-    for (const entry of quotaEntries) {
-      await loadOne(entry);
+    if (quotaEntries.length === 0 || batchLoading) return;
+    setBatchLoading(true);
+    try {
+      const concurrency = 4;
+      const queue = [...quotaEntries];
+      const workers = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
+        while (queue.length > 0) {
+          const item = queue.shift();
+          if (item) {
+            await loadOne(item);
+          }
+        }
+      });
+      await Promise.all(workers);
+      toast.success(t("common.saved", "全部配额查询完成"));
+    } finally {
+      setBatchLoading(false);
     }
   };
 
   return (
     <>
       <PageHeader title={t("nav.quota")} subtitle={t("quota.subtitle")}>
-        <Button size="sm" className="h-8 text-xs" onClick={loadAll} disabled={quotaEntries.length === 0}>
-          <RefreshCw className="size-3.5" />
-          {t("quota.loadAll")}
+        <Button
+          size="sm"
+          className="h-8 gap-1.5 text-xs"
+          onClick={loadAll}
+          disabled={quotaEntries.length === 0 || batchLoading}
+        >
+          {batchLoading ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="size-3.5" />
+          )}
+          {batchLoading ? "批量查询中..." : t("quota.loadAll")}
         </Button>
       </PageHeader>
 

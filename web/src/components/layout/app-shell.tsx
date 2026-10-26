@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   KeyRound,
   LayoutDashboard,
+  Menu,
   Moon,
   PanelRight,
   Search,
@@ -17,11 +18,13 @@ import { useTheme } from "next-themes";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { AppSidebar } from "./app-sidebar";
 import { CommandPalette } from "./command-palette";
 import { InspectorDrawer } from "./inspector-drawer";
+import { ErrorBoundary } from "@/components/shared/error-boundary";
 import { server } from "@/api/management";
 import { usePrefsStore } from "@/stores/prefs";
 import { cn } from "@/lib/utils";
@@ -50,6 +53,7 @@ export function AppShell() {
 
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // Keep document language in sync
   const locale = usePrefsStore((state) => state.locale);
@@ -72,12 +76,21 @@ export function AppShell() {
           {/* Breadcrumb & Gateway Status */}
           <div className="flex items-center gap-3 min-w-0">
             <div className="flex items-center gap-2 min-w-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8 rounded-xl md:hidden text-slate-600 dark:text-slate-300"
+                onClick={() => setMobileNavOpen(true)}
+                aria-label="Toggle navigation menu"
+              >
+                <Menu className="size-4.5" />
+              </Button>
               <h2 className="text-sm md:text-base font-bold text-slate-900 dark:text-slate-100 truncate tracking-tight">
                 {t(titleKey) || "控制台"}
               </h2>
               <span className="hidden sm:inline-block text-slate-300 dark:text-slate-700">/</span>
               <span className="hidden sm:inline-block text-xs text-slate-400 font-medium">
-                CLIProxyAPI 智能网关
+                {t("nav.consoleSubtitle", "CLIProxyAPI 智能网关")}
               </span>
             </div>
 
@@ -86,7 +99,7 @@ export function AppShell() {
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex size-2 rounded-full bg-emerald-500"></span>
               </span>
-              <span>网关在线</span>
+              <span>{t("nav.gatewayOnline", "网关在线")}</span>
             </div>
           </div>
 
@@ -135,7 +148,7 @@ export function AppShell() {
                   <PanelRight className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="bottom">实时测控面板</TooltipContent>
+              <TooltipContent side="bottom">{t("nav.realtimeInspector", "实时测控面板")}</TooltipContent>
             </Tooltip>
 
             <LanguageToggle />
@@ -153,7 +166,9 @@ export function AppShell() {
           )}
         >
           <div className={cn("mx-auto w-full", isPluginPage ? "flex-1 flex flex-col max-w-none" : "max-w-[1700px]")}>
-            <Outlet />
+            <ErrorBoundary>
+              <Outlet />
+            </ErrorBoundary>
           </div>
         </main>
 
@@ -191,6 +206,27 @@ export function AppShell() {
           />
         </nav>
       </div>
+
+      {/* Mobile Full Navigation Drawer */}
+      <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+        <SheetContent
+          side="left"
+          className="p-0 w-72 sm:w-80 border-r border-slate-200 dark:border-slate-800"
+          showCloseButton={false}
+        >
+          <SheetHeader className="sr-only">
+            <SheetTitle>{t("app.title")}</SheetTitle>
+          </SheetHeader>
+          <AppSidebar
+            mobile
+            onOpenSearch={() => {
+              setMobileNavOpen(false);
+              setCommandPaletteOpen(true);
+            }}
+            onNavigate={() => setMobileNavOpen(false)}
+          />
+        </SheetContent>
+      </Sheet>
 
       <CommandPalette open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} />
       <InspectorDrawer open={inspectorOpen} onClose={() => setInspectorOpen(false)} />

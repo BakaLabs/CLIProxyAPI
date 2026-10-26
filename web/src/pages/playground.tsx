@@ -12,6 +12,7 @@ import {
   Copy,
   Cpu,
   Eraser,
+  ImagePlus,
   PanelRight,
   Pause,
   Pencil,
@@ -21,6 +22,7 @@ import {
   Sliders,
   Terminal,
   Trash2,
+  X,
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -39,6 +41,7 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { ALL_KINDS, type Entry } from "@/components/providers/provider-tools";
+import { MarkdownViewer } from "@/components/shared/markdown-viewer";
 import { providerLists } from "@/api/management";
 import { currentKey } from "@/stores/auth";
 import { dayjs, formatDuration, formatTPS } from "@/lib/format";
@@ -62,6 +65,7 @@ interface PlaygroundMessage {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  images?: string[];
   reasoningContent?: string;
   timestamp: number;
   model?: string;
@@ -136,59 +140,6 @@ const PRESET_PROMPTS = [
   },
 ];
 
-function FormattedContent({ content }: { content: string }) {
-  if (!content.includes("```")) {
-    return <p className="whitespace-pre-wrap font-sans">{content}</p>;
-  }
-
-  const parts = content.split(/(```[\s\S]*?```)/g);
-  return (
-    <div className="space-y-2 text-xs">
-      {parts.map((part, index) => {
-        if (part.startsWith("```") && part.endsWith("```")) {
-          const inner = part.slice(3, -3);
-          const firstLineEnd = inner.indexOf("\n");
-          let lang = "";
-          let code = inner;
-          if (firstLineEnd !== -1) {
-            const firstLine = inner.slice(0, firstLineEnd).trim();
-            if (firstLine && !firstLine.includes(" ")) {
-              lang = firstLine;
-              code = inner.slice(firstLineEnd + 1);
-            }
-          }
-          return (
-            <div key={index} className="my-2 overflow-hidden rounded-xl border border-slate-700/60 bg-slate-950 text-slate-100 shadow-xs">
-              <div className="flex items-center justify-between border-b border-slate-800 bg-slate-900/80 px-3 py-1 text-[10px] font-mono text-slate-400">
-                <span>{lang || "code"}</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void navigator.clipboard.writeText(code);
-                    toast.success("代码已复制");
-                  }}
-                  className="flex items-center gap-1 hover:text-white transition cursor-pointer"
-                >
-                  <Copy className="size-3" />
-                  <span>复制</span>
-                </button>
-              </div>
-              <pre className="overflow-x-auto p-3 font-mono text-[11px] leading-relaxed">
-                <code>{code}</code>
-              </pre>
-            </div>
-          );
-        }
-        return (
-          <p key={index} className="whitespace-pre-wrap font-sans">
-            {part}
-          </p>
-        );
-      })}
-    </div>
-  );
-}
-
 function loadPersistedSessions(): PlaygroundSession[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -227,6 +178,8 @@ export function PlaygroundPage() {
 
   // Execution & Input State
   const [input, setInput] = useState("");
+  const [inputImages, setInputImages] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [stream, setStream] = useState(true);
   const [temperature, setTemperature] = useState(0.7);
@@ -497,22 +450,70 @@ export function PlaygroundPage() {
     void handleSend(prompt, userMsgIndex);
   };
 
+  const handleImageUpload = (files: FileList | File[]) => {
+    Array.from(files).forEach((file) => {
+      if (!file.type.startsWith("image/")) {
+        toast.error("仅支持上传图片文件");
+        return;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        toast.error("单张图片大小不能超过 10MB");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string;
+        if (dataUrl) {
+          setInputImages((prev) => [...prev, dataUrl]);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imageFiles: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item && item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) imageFiles.push(file);
+      }
+    }
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      handleImageUpload(imageFiles);
+      toast.success(`已添加 ${imageFiles.length} 张剪贴板图片`);
+    }
+  };
+
   // Send API Request (supports regular send, quick prompt, and rollback resend at truncateIndex)
   const handleSend = async (overridePrompt?: string, truncateIndex?: number) => {
     const textToSend = (overridePrompt ?? input).trim();
-    if (!textToSend || loading) return;
+    if ((!textToSend && inputImages.length === 0) || loading) return;
 
     const userMsgId = Math.random().toString(36).slice(2, 10);
     const assistantMsgId = Math.random().toString(36).slice(2, 10);
+
+    const imagesToSend =
+      truncateIndex !== undefined && activeSession.messages[truncateIndex]?.images
+        ? activeSession.messages[truncateIndex]!.images!
+        : [...inputImages];
 
     const userMessage: PlaygroundMessage = {
       id: userMsgId,
       role: "user",
       content: textToSend,
+      images: imagesToSend.length > 0 ? imagesToSend : undefined,
       timestamp: Date.now(),
     };
 
-    if (!overridePrompt && truncateIndex === undefined) setInput("");
+    if (!overridePrompt && truncateIndex === undefined) {
+      setInput("");
+      setInputImages([]);
+    }
     setLoading(true);
 
     const targetModel = selectedModel.trim() || "gpt-4o";
@@ -522,15 +523,36 @@ export function PlaygroundPage() {
         ? activeSession.messages.slice(0, truncateIndex)
         : activeSession.messages;
 
+    const buildContent = (m: PlaygroundMessage) => {
+      if (m.images && m.images.length > 0) {
+        return [
+          ...(m.content.trim() ? [{ type: "text", text: m.content }] : [{ type: "text", text: " " }]),
+          ...m.images.map((img) => ({
+            type: "image_url",
+            image_url: { url: img },
+          })),
+        ];
+      }
+      return m.content;
+    };
+
     // Assemble OpenAI-standard chat payload, excluding empty or errored entries
     const validHistory = baseHistory
-      .filter((m) => !m.error && m.content.trim().length > 0 && (m.role === "user" || m.role === "assistant"))
-      .map((m) => ({ role: m.role, content: m.content }));
+      .filter((m) => !m.error && (m.content.trim().length > 0 || (m.images && m.images.length > 0)) && (m.role === "user" || m.role === "assistant"))
+      .map((m) => ({ role: m.role, content: buildContent(m) }));
+
+    const userPayloadContent =
+      imagesToSend.length > 0
+        ? [
+            ...(textToSend.trim() ? [{ type: "text", text: textToSend }] : [{ type: "text", text: " " }]),
+            ...imagesToSend.map((img) => ({ type: "image_url", image_url: { url: img } })),
+          ]
+        : textToSend;
 
     const messagesPayload = [
       ...(systemPrompt.trim() ? [{ role: "system", content: systemPrompt.trim() }] : []),
       ...validHistory,
-      { role: "user", content: textToSend },
+      { role: "user", content: userPayloadContent },
     ];
 
     const requestPayload = {
@@ -1204,9 +1226,10 @@ export function PlaygroundPage() {
                           <Brain className="size-3.5" />
                           <span>思考链过程 (Reasoning Process)</span>
                         </div>
-                        <p className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed opacity-90">
-                          {msg.reasoningContent}
-                        </p>
+                        <MarkdownViewer
+                          content={msg.reasoningContent}
+                          className="opacity-90 text-[11px]"
+                        />
                       </div>
                     )}
 
@@ -1285,9 +1308,24 @@ export function PlaygroundPage() {
                           )}
                         >
                           {isUser ? (
-                            <p className="whitespace-pre-wrap font-sans">{msg.content}</p>
+                            <>
+                              {msg.images && msg.images.length > 0 ? (
+                                <div className="mb-2 flex flex-wrap gap-1.5">
+                                  {msg.images.map((img, imgIdx) => (
+                                    <img
+                                      key={imgIdx}
+                                      src={img}
+                                      alt="attachment"
+                                      className="size-16 sm:size-20 rounded-lg object-cover border border-white/20 shadow-xs cursor-pointer hover:opacity-90 transition"
+                                      onClick={() => window.open(img, "_blank")}
+                                    />
+                                  ))}
+                                </div>
+                              ) : null}
+                              <p className="whitespace-pre-wrap font-sans">{msg.content}</p>
+                            </>
                           ) : (
-                            <FormattedContent
+                            <MarkdownViewer
                               content={msg.content || (loading ? "正在连接上游网关并实时接收推理数据..." : "")}
                             />
                           )}
@@ -1437,11 +1475,61 @@ export function PlaygroundPage() {
 
         {/* ------------------------------------------------------------- Input Bar */}
         <div className="border-t border-slate-200/70 bg-white/80 p-3 sm:p-4 backdrop-blur-md dark:border-slate-800/70 dark:bg-slate-900/80">
-          <div className="relative flex items-center rounded-2xl border border-slate-200/80 bg-slate-50/90 p-1.5 shadow-sm ring-1 ring-slate-100 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-950/70 dark:ring-slate-900">
+          {/* Image preview chips */}
+          {inputImages.length > 0 && (
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              {inputImages.map((img, idx) => (
+                <div key={idx} className="relative group size-14 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 shadow-xs">
+                  <img src={img} alt="preview" className="size-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => setInputImages((prev) => prev.filter((_, i) => i !== idx))}
+                    className="absolute top-1 right-1 flex size-4 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/90 transition cursor-pointer"
+                    title="移除图片"
+                  >
+                    <X className="size-2.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (e.dataTransfer?.files) handleImageUpload(e.dataTransfer.files);
+            }}
+            className="relative flex items-center rounded-2xl border border-slate-200/80 bg-slate-50/90 p-1.5 shadow-sm ring-1 ring-slate-100 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-950/70 dark:ring-slate-900"
+          >
+            {/* Image upload button */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files) handleImageUpload(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-8 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 shrink-0"
+              onClick={() => fileInputRef.current?.click()}
+              title="上传图片 (支持粘贴与拖拽)"
+            >
+              <ImagePlus className="size-4" />
+            </Button>
+
             <textarea
               rows={1}
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onPaste={handlePaste}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
@@ -1449,7 +1537,7 @@ export function PlaygroundPage() {
                 }
               }}
               placeholder={t("playground.inputPlaceholder")}
-              className="max-h-32 min-h-[38px] flex-1 resize-none bg-transparent px-3 py-2 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none dark:text-slate-200 leading-relaxed font-sans"
+              className="max-h-32 min-h-[38px] flex-1 resize-none bg-transparent px-2 py-2 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none dark:text-slate-200 leading-relaxed font-sans"
             />
 
             {/* Stop or Send Button */}
@@ -1466,7 +1554,7 @@ export function PlaygroundPage() {
             ) : (
               <Button
                 size="icon"
-                disabled={!input.trim()}
+                disabled={!input.trim() && inputImages.length === 0}
                 className="size-8.5 rounded-xl bg-blue-600 text-white shadow-xs transition hover:bg-blue-700 disabled:opacity-30"
                 onClick={() => handleSend()}
                 title={t("playground.send")}

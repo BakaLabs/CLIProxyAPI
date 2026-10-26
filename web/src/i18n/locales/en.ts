@@ -26,6 +26,7 @@ const en = {
     quickSearch: "Quick search (⌘K)",
     gatewayOnline: "Gateway Online",
     consoleSubtitle: "AI Gateway Console",
+    realtimeInspector: "Real-time Inspector",
     short: {
       dashboard: "Monitor",
       providers: "Vendor",
