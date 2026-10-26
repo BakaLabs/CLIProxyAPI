@@ -7,7 +7,7 @@ import (
 
 // currentSchemaVersion is the schema revision this binary expects. Bump it and
 // add a migration step in migrate whenever the table layout changes.
-const currentSchemaVersion = 1
+const currentSchemaVersion = 2
 
 const schemaV1 = `
 CREATE TABLE IF NOT EXISTS request_logs (
@@ -88,6 +88,24 @@ func migrate(db *sql.DB) error {
 		}
 		if _, err := db.Exec(`INSERT INTO schema_version (version) VALUES (1)`); err != nil {
 			return fmt.Errorf("requestdb: record schema v1: %w", err)
+		}
+	}
+	if version < 2 {
+		if _, err := db.Exec(`
+			UPDATE request_logs
+			SET total_tokens = CASE
+				WHEN total_tokens < (input_tokens + cache_read_tokens + cache_creation_tokens + output_tokens)
+				THEN (input_tokens + cache_read_tokens + cache_creation_tokens + output_tokens)
+				ELSE total_tokens END,
+				input_tokens = input_tokens + cache_read_tokens + cache_creation_tokens
+			WHERE (provider LIKE '%claude%' OR provider LIKE '%anthropic%' OR executor_type LIKE '%claude%' OR input_tokens < cache_read_tokens)
+			  AND (cache_read_tokens > 0 OR cache_creation_tokens > 0)
+			  AND input_tokens < (cache_read_tokens + cache_creation_tokens);
+		`); err != nil {
+			return fmt.Errorf("requestdb: apply schema v2: %w", err)
+		}
+		if _, err := db.Exec(`INSERT INTO schema_version (version) VALUES (2)`); err != nil {
+			return fmt.Errorf("requestdb: record schema v2: %w", err)
 		}
 	}
 	return nil

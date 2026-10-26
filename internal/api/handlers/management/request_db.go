@@ -127,6 +127,15 @@ func (h *Handler) GetRequestDBRecordDetail(c *gin.Context) {
 }
 
 func newRequestDBRecordResponse(e *requestdb.Entry, withContent bool) requestDBRecordResponse {
+	inputTokens := e.InputTokens
+	if e.CacheReadTokens > 0 && inputTokens < e.CacheReadTokens {
+		inputTokens += e.CacheReadTokens + e.CacheCreationTokens
+	}
+	totalTokens := e.TotalTokens
+	if totalTokens == 0 && (inputTokens > 0 || e.OutputTokens > 0) {
+		totalTokens = inputTokens + e.OutputTokens
+	}
+
 	response := requestDBRecordResponse{
 		ID:                       e.ID,
 		RequestedAt:              e.RequestedAtMS,
@@ -163,13 +172,13 @@ func newRequestDBRecordResponse(e *requestdb.Entry, withContent bool) requestDBR
 		StatusCode:               e.StatusCode,
 		LatencyMS:                e.LatencyMS,
 		TTFTMS:                   e.TTFTMS,
-		InputTokens:              e.InputTokens,
+		InputTokens:              inputTokens,
 		OutputTokens:             e.OutputTokens,
 		ReasoningTokens:          e.ReasoningTokens,
 		CachedTokens:             e.CachedTokens,
 		CacheReadTokens:          e.CacheReadTokens,
 		CacheCreationTokens:      e.CacheCreationTokens,
-		TotalTokens:              e.TotalTokens,
+		TotalTokens:              totalTokens,
 	}
 	model := e.Model
 	if model == "" {
@@ -178,7 +187,7 @@ func newRequestDBRecordResponse(e *requestdb.Entry, withContent bool) requestDBR
 	if model == "" {
 		model = e.Alias
 	}
-	response.EstimatedCostUSD = pricing.CalculateCost(model, e.InputTokens, e.OutputTokens, e.CacheReadTokens)
+	response.EstimatedCostUSD = pricing.CalculateCost(model, inputTokens, e.OutputTokens, e.CacheReadTokens)
 	if !withContent {
 		return response
 	}

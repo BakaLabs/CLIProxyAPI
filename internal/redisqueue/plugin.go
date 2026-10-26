@@ -104,15 +104,32 @@ func (p *usageQueuePlugin) HandleUsage(ctx context.Context, record coreusage.Rec
 	}
 
 	usageDetail := coreusage.EnsureTokenBreakdownForProvider(record.Detail, record.Provider, record.ExecutorType)
+	inputTokens := usageDetail.InputTokens
+	if usageDetail.TokenBreakdown.Valid() && usageDetail.TokenBreakdown.Input.TotalTokens > 0 {
+		inputTokens = usageDetail.TokenBreakdown.Input.TotalTokens
+	} else if usageDetail.CacheReadTokens > 0 && inputTokens < usageDetail.CacheReadTokens {
+		inputTokens += usageDetail.CacheReadTokens + usageDetail.CacheCreationTokens
+	}
+	outputTokens := usageDetail.OutputTokens
+	if usageDetail.TokenBreakdown.Valid() && usageDetail.TokenBreakdown.Output.TotalTokens > 0 {
+		outputTokens = usageDetail.TokenBreakdown.Output.TotalTokens
+	}
+	totalTokens := usageDetail.TotalTokens
+	if usageDetail.TokenBreakdown.Valid() && usageDetail.TokenBreakdown.TotalTokens > 0 {
+		totalTokens = usageDetail.TokenBreakdown.TotalTokens
+	} else if totalTokens == 0 && (inputTokens > 0 || outputTokens > 0) {
+		totalTokens = inputTokens + outputTokens
+	}
+
 	tokens := tokenStats{
-		InputTokens:            usageDetail.InputTokens,
-		OutputTokens:           usageDetail.OutputTokens,
+		InputTokens:            inputTokens,
+		OutputTokens:           outputTokens,
 		ReasoningTokens:        usageDetail.ReasoningTokens,
 		CachedTokens:           usageDetail.CachedTokens,
 		CacheReadTokens:        usageDetail.CacheReadTokens,
 		CacheReadTokensPresent: true,
 		CacheCreationTokens:    usageDetail.CacheCreationTokens,
-		TotalTokens:            usageDetail.TotalTokens,
+		TotalTokens:            totalTokens,
 	}
 
 	failed := record.Failed

@@ -164,8 +164,10 @@ export function DashboardPage() {
   const successRate = totalReqs > 0 ? (totalReqs - failedReqs) / totalReqs : 1;
 
   // Cache hit calculation
-  const promptTokens = (stats.data?.input_tokens ?? 0) + (stats.data?.cached_tokens ?? 0);
-  const cacheHitRate = promptTokens > 0 ? (stats.data?.cached_tokens ?? 0) / promptTokens : 0;
+  const inTok = stats.data?.input_tokens ?? 0;
+  const cachedTok = stats.data?.cached_tokens ?? 0;
+  const promptTokens = inTok >= cachedTok ? inTok : inTok + cachedTok;
+  const cacheHitRate = promptTokens > 0 ? cachedTok / promptTokens : 0;
 
   // Daily cost estimate based on range duration
   const rangeDurationDays = Math.max(
@@ -777,8 +779,10 @@ function ComprehensiveBreakdownTable({
                 const succRate = 1 - errRate;
 
                 // Cache hit rate calculation for row
-                const promptTotal = (row.input_tokens || 0) + (row.cache_read_tokens || 0);
-                const hitRate = promptTotal > 0 ? ((row.cache_read_tokens || 0) / promptTotal) * 100 : 0;
+                const inTok = row.input_tokens || 0;
+                const cacheRead = row.cache_read_tokens || 0;
+                const promptTotal = inTok >= cacheRead ? inTok : inTok + cacheRead;
+                const hitRate = promptTotal > 0 ? (cacheRead / promptTotal) * 100 : 0;
 
                 return (
                   <tr key={row.key} className="border-b border-border/50 hover:bg-secondary/40 transition-colors">

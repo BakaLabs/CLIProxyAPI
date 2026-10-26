@@ -72,6 +72,56 @@ func TestStoreMigrateIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestStoreMigrateV2UpdatesLegacyTokenCounts(t *testing.T) {
+	store, path := openTestStore(t)
+	// Force database back to schema version 1 and insert a legacy row with uncached input = 0 and cache read = 266072
+	if _, err := store.db.Exec(`DELETE FROM schema_version`); err != nil {
+		t.Fatalf("clear schema_version: %v", err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO schema_version (version) VALUES (1)`); err != nil {
+		t.Fatalf("insert schema v1: %v", err)
+	}
+	if _, err := store.db.Exec(`
+		INSERT INTO request_logs (
+			requested_at, request_id, provider, executor_type, model,
+			input_tokens, output_tokens, cached_tokens, cache_read_tokens, total_tokens
+		) VALUES (
+			1000, 'legacy-1', 'claude', 'claude', 'claude-3-5-sonnet',
+			0, 5000, 266072, 266072, 271072
+		);
+	`); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	// Re-opening triggers migrate() which upgrades to schema v2
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatalf("re-Open store: %v", err)
+	}
+	defer func() { _ = reopened.Close() }()
+
+	var inputTokens, outputTokens, totalTokens int64
+	if err := reopened.db.QueryRow(`
+		SELECT input_tokens, output_tokens, total_tokens
+		FROM request_logs WHERE request_id = 'legacy-1'
+	`).Scan(&inputTokens, &outputTokens, &totalTokens); err != nil {
+		t.Fatalf("query migrated row: %v", err)
+	}
+
+	if inputTokens != 266072 {
+		t.Fatalf("migrated input_tokens = %d, want 266072", inputTokens)
+	}
+	if outputTokens != 5000 {
+		t.Fatalf("output_tokens = %d, want 5000", outputTokens)
+	}
+	if totalTokens != 271072 {
+		t.Fatalf("total_tokens = %d, want 271072", totalTokens)
+	}
+}
+
 func TestStoreInsertBatchAndQueryRoundtrip(t *testing.T) {
 	store, _ := openTestStore(t)
 	ctx := context.Background()

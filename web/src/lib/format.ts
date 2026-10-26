@@ -151,26 +151,52 @@ export function getTTFTColorClass(ms: number | undefined | null): string {
   return "text-rose-500 dark:text-rose-400 font-mono";
 }
 
+/**
+ * Resolves total prompt/input tokens for a record, handling protocols (e.g. Anthropic)
+ * where input_tokens may represent only uncached input while cache read/write tokens were separate.
+ */
+export function resolveTotalInputTokens(record: {
+  input_tokens?: number;
+  cached_tokens?: number;
+  cache_read_tokens?: number;
+  cache_creation_tokens?: number;
+  provider?: string;
+  executor_type?: string;
+  token_breakdown?: unknown;
+}): number {
+  if (
+    record.token_breakdown &&
+    typeof record.token_breakdown === "object" &&
+    "input" in record.token_breakdown &&
+    record.token_breakdown.input &&
+    typeof (record.token_breakdown.input as { total_tokens?: unknown }).total_tokens === "number" &&
+    (record.token_breakdown.input as { total_tokens: number }).total_tokens > 0
+  ) {
+    return (record.token_breakdown.input as { total_tokens: number }).total_tokens;
+  }
+  const input = record.input_tokens || 0;
+  const cached = Math.max(record.cached_tokens || 0, record.cache_read_tokens || 0);
+  const cacheCreation = record.cache_creation_tokens || 0;
+  if (cached > 0 && input < cached) {
+    return input + cached + cacheCreation;
+  }
+  return input;
+}
+
 /** Calculate prompt cache hit rate percentage string (e.g. "85%", "12.5%", "0%"). */
 export function computeCacheHitRate(record: {
   cached_tokens?: number;
   cache_read_tokens?: number;
   input_tokens?: number;
+  cache_creation_tokens?: number;
   provider?: string;
   executor_type?: string;
+  token_breakdown?: unknown;
 }): string {
   const cached = Math.max(record.cached_tokens || 0, record.cache_read_tokens || 0);
   if (cached <= 0) return "0%";
 
-  const isAnthropic = Boolean(
-    record.provider?.toLowerCase().includes("anthropic") ||
-    record.provider?.toLowerCase().includes("claude") ||
-    record.executor_type?.toLowerCase().includes("claude")
-  );
-
-  const promptTokens = isAnthropic
-    ? ((record.input_tokens || 0) + cached)
-    : Math.max(record.input_tokens || 0, cached);
+  const promptTokens = resolveTotalInputTokens(record);
 
   if (promptTokens <= 0) return "0%";
   const pct = Math.min(100, Math.max(0, (cached / promptTokens) * 100));

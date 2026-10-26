@@ -150,3 +150,39 @@ func TestBuildEntryCapturesPreviews(t *testing.T) {
 		t.Fatalf("previews without holder = %q/%q, want nil", entry.RequestPreview, entry.ResponsePreview)
 	}
 }
+
+func TestBuildEntryNormalizesTotalInputTokensForIndependentAccounting(t *testing.T) {
+	record := coreusage.Record{
+		Provider:     "claude",
+		ExecutorType: "claude",
+		RequestedAt:  time.UnixMilli(1000),
+		Detail: coreusage.Detail{
+			InputTokens:         0,
+			OutputTokens:        5947,
+			CacheReadTokens:     266072,
+			CacheCreationTokens: 100,
+			TotalTokens:         272119,
+			TokenBreakdown: coreusage.NewIndependentTokenBreakdown(
+				0,
+				266072,
+				100,
+				5947,
+				0,
+				272119,
+			),
+		},
+	}
+
+	entry := buildEntry(context.Background(), record)
+
+	// Total input should be uncached (0) + cacheRead (266072) + cacheCreation (100) = 266172
+	if entry.InputTokens != 266172 {
+		t.Fatalf("InputTokens = %d, want 266172", entry.InputTokens)
+	}
+	if entry.OutputTokens != 5947 {
+		t.Fatalf("OutputTokens = %d, want 5947", entry.OutputTokens)
+	}
+	if entry.TotalTokens != 272119 {
+		t.Fatalf("TotalTokens = %d, want 272119", entry.TotalTokens)
+	}
+}

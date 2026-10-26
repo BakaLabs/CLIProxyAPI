@@ -21,7 +21,7 @@ import { TimeRangeSelect } from "@/components/shared/time-range-select";
 import { requestDB, fileLogs, type RecordFilter } from "@/api/management";
 import { errMessage, errStatus, type RequestRecord } from "@/api/types";
 import { useLiveRecords } from "@/hooks/use-live-records";
-import { computeCacheHitRate, computeTPS, dayjs, downloadText, formatDuration, formatInt, formatLatencySeconds, formatNumber, formatTPS, formatTime, formatUSD, getLatencyColorClass, getTTFTColorClass, maskKey, toCSV } from "@/lib/format";
+import { computeCacheHitRate, computeTPS, dayjs, downloadText, formatDuration, formatInt, formatLatencySeconds, formatNumber, formatTPS, formatTime, formatUSD, getLatencyColorClass, getTTFTColorClass, maskKey, resolveTotalInputTokens, toCSV } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { usePrefsStore, resolveRange, type TimeRange } from "@/stores/prefs";
 
@@ -107,12 +107,14 @@ function ModelChainDisplay({ record }: { record: RequestRecord }) {
 }
 
 function TokenMetricCell({ record }: { record: RequestRecord }) {
+  const totalInput = resolveTotalInputTokens(record);
   const cachePct = computeCacheHitRate(record);
-  const title = `Input: ${formatInt(record.input_tokens)} | Output: ${formatInt(record.output_tokens)} | Thinking: ${formatInt(record.reasoning_tokens)} | Cache: ${cachePct}`;
+  const uncachedPart = totalInput !== (record.input_tokens || 0) ? ` (Uncached: ${formatInt(record.input_tokens)})` : "";
+  const title = `Input: ${formatInt(totalInput)}${uncachedPart} | Output: ${formatInt(record.output_tokens)} | Thinking: ${formatInt(record.reasoning_tokens)} | Cache: ${cachePct}`;
 
   return (
     <div className="flex items-center justify-end gap-1 font-mono text-xs" title={title}>
-      <span className="text-sky-500" title="Input">{formatNumber(record.input_tokens)}</span>
+      <span className="text-sky-500" title={`Input${uncachedPart}`}>{formatNumber(totalInput)}</span>
       <span className="text-muted-foreground/40">/</span>
       <span className="text-emerald-500" title="Output">{formatNumber(record.output_tokens)}</span>
       <span className="text-muted-foreground/40">/</span>
@@ -162,7 +164,7 @@ export function RequestLogsPage() {
       record.effective_service_tier || record.service_tier || "",
       record.reasoning_effort || record.requested_reasoning_effort || "",
       record.api_key ?? "",
-      record.input_tokens,
+      resolveTotalInputTokens(record),
       record.output_tokens,
       record.reasoning_tokens,
       computeCacheHitRate(record),
@@ -540,7 +542,13 @@ function ModelFilterCombobox({ placeholder, value, range, onChange }: { placehol
                     [t("requestLogs.table.ttft"), data.ttft_ms > 0 ? formatDuration(data.ttft_ms) : "—"],
                     [t("requestLogs.table.tps"), data.failed ? "—" : formatTPS(computeTPS(data.output_tokens, data.latency_ms))],
                     [t("requestLogs.detail.cost", "预估价格"), data.failed && !data.estimated_cost_usd ? "—" : formatUSD(data.estimated_cost_usd)],
-                    ["Input / Output / Reasoning", `${formatInt(data.input_tokens)} / ${formatInt(data.output_tokens)} / ${formatInt(data.reasoning_tokens)}`],
+                    (() => {
+                      const totalInput = resolveTotalInputTokens(data);
+                      const inputLabel = totalInput !== (data.input_tokens || 0)
+                        ? `${formatInt(totalInput)} (uncached: ${formatInt(data.input_tokens)})`
+                        : formatInt(data.input_tokens);
+                      return ["Input / Output / Reasoning", `${inputLabel} / ${formatInt(data.output_tokens)} / ${formatInt(data.reasoning_tokens)}`];
+                    })(),
                     ["Cached", `${formatInt(data.cached_tokens)} · read ${formatInt(data.cache_read_tokens)} · create ${formatInt(data.cache_creation_tokens)} (hit: ${computeCacheHitRate(data)})`],
                     [t("requestLogs.detail.endpoint"), data.endpoint || "—"],
                     [t("requestLogs.detail.requestedModel", "请求模型"), data.alias?.trim() || data.model?.trim() || "—"],
