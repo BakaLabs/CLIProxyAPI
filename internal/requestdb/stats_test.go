@@ -166,27 +166,30 @@ func TestBreakdown(t *testing.T) {
 	}
 }
 
-func TestBreakdownResponseModel(t *testing.T) {
+func TestBreakdownRequestModel(t *testing.T) {
 	store := newTestStore(t)
 	entries := []Entry{
 		{
 			RequestedAtMS: 1000,
-			Model:         "gpt-4o",
-			ResponseModel: "gpt-4o-2024-08-06",
+			Alias:         "alias-model-a",
+			Model:         "upstream-model-b",
+			ResponseModel: "reported-model-c",
 			InputTokens:   1000,
 			OutputTokens:  500,
 		},
 		{
 			RequestedAtMS: 2000,
-			Model:         "gpt-4o",
-			ResponseModel: "gpt-4o-2024-08-06",
+			Alias:         "alias-model-a2",
+			Model:         "upstream-model-b",
+			ResponseModel: "reported-model-c2",
 			InputTokens:   2000,
 			OutputTokens:  1000,
 		},
 		{
 			RequestedAtMS: 3000,
+			Alias:         "alias-other",
 			Model:         "claude-3-5-sonnet",
-			ResponseModel: "", // Fallback to Model when response_model is empty
+			ResponseModel: "claude-3-5-sonnet-20241022",
 			InputTokens:   500,
 			OutputTokens:  200,
 		},
@@ -200,8 +203,9 @@ func TestBreakdownResponseModel(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2", len(rows))
 	}
-	if rows[0].Key != "gpt-4o-2024-08-06" || rows[0].Requests != 2 {
-		t.Errorf("rows[0] = %+v, want gpt-4o-2024-08-06 with 2 requests", rows[0])
+	// Groups by actual request model (b), not alias (a) or response_model (c)
+	if rows[0].Key != "upstream-model-b" || rows[0].Requests != 2 {
+		t.Errorf("rows[0] = %+v, want upstream-model-b with 2 requests", rows[0])
 	}
 	if rows[1].Key != "claude-3-5-sonnet" || rows[1].Requests != 1 {
 		t.Errorf("rows[1] = %+v, want claude-3-5-sonnet with 1 request", rows[1])

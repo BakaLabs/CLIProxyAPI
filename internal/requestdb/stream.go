@@ -66,14 +66,10 @@ func streamSubscriberCount() int {
 
 // matchesStreamFilter evaluates the subscriber's equality filters.
 func matchesStreamFilter(q Query, e *Entry) bool {
-	effectiveModel := e.ResponseModel
-	if effectiveModel == "" {
-		effectiveModel = e.Model
-	}
 	if len(q.Models) > 0 {
 		matched := false
 		for _, m := range q.Models {
-			if m == effectiveModel || m == e.Model {
+			if m == e.Model {
 				matched = true
 				break
 			}
@@ -81,7 +77,7 @@ func matchesStreamFilter(q Query, e *Entry) bool {
 		if !matched {
 			return false
 		}
-	} else if q.Model != "" && q.Model != effectiveModel && q.Model != e.Model {
+	} else if q.Model != "" && q.Model != e.Model {
 		return false
 	}
 	if q.Provider != "" && q.Provider != e.Provider {

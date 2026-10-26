@@ -180,12 +180,12 @@ func newRequestDBRecordResponse(e *requestdb.Entry, withContent bool) requestDBR
 		CacheCreationTokens:      e.CacheCreationTokens,
 		TotalTokens:              totalTokens,
 	}
-	model := e.ResponseModel
-	if model == "" {
-		model = e.Model
-	}
+	model := e.Model
 	if model == "" {
 		model = e.Alias
+	}
+	if model == "" {
+		model = e.ResponseModel
 	}
 	response.EstimatedCostUSD = pricing.CalculateCost(model, inputTokens, e.OutputTokens, e.CacheReadTokens)
 	if !withContent {
