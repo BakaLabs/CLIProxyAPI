@@ -84,6 +84,22 @@ func claudeInputTokenizer() (tokenizer.Codec, error) {
 	return claudeInputTokenizerCodec, claudeInputTokenizerErr
 }
 
+// CountClaudeTextTokens estimates the token count for a text string using the Claude/O200kBase tokenizer.
+func CountClaudeTextTokens(text string) int64 {
+	if text == "" {
+		return 0
+	}
+	enc, err := claudeInputTokenizer()
+	if err != nil || enc == nil {
+		return 0
+	}
+	count, errCount := enc.Count(text)
+	if errCount != nil {
+		return 0
+	}
+	return int64(count)
+}
+
 // CountClaudeInputTokens estimates tokens for a Claude request with the O200kBase tokenizer.
 func CountClaudeInputTokens(payload []byte) (int64, error) {
 	enc, err := claudeInputTokenizer()

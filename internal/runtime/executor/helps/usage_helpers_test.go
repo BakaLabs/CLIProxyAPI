@@ -477,6 +477,70 @@ func TestParseClaudeUsageFallsBackToTopLevelThinkingTokens(t *testing.T) {
 	}
 }
 
+func TestParseClaudeUsageEstimatesThinkingTokensFromContent(t *testing.T) {
+	// Upstream returns output_tokens=50 without thinking_tokens in usage,
+	// but content includes a thinking block.
+	data := []byte(`{
+		"content": [
+			{"type": "thinking", "thinking": "Let me carefully analyze the user query and plan out the steps required to solve this problem correctly."},
+			{"type": "text", "text": "Here is the result."}
+		],
+		"usage": {
+			"input_tokens": 10,
+			"output_tokens": 50
+		}
+	}`)
+	detail := ParseClaudeUsage(data)
+	if detail.OutputTokens != 50 {
+		t.Fatalf("OutputTokens = %d, want 50", detail.OutputTokens)
+	}
+	if detail.ReasoningTokens <= 0 {
+		t.Fatalf("expected estimated ReasoningTokens > 0, got %d", detail.ReasoningTokens)
+	}
+	if detail.ReasoningTokens >= 50 {
+		t.Fatalf("estimated ReasoningTokens (%d) should be strictly less than 50", detail.ReasoningTokens)
+	}
+	if detail.TokenBreakdown.Output.NonReasoningTokens+detail.TokenBreakdown.Output.ReasoningTokens != 50 {
+		t.Fatalf("TokenBreakdown output tokens mismatch: nonReasoning=%d, reasoning=%d, want sum 50",
+			detail.TokenBreakdown.Output.NonReasoningTokens, detail.TokenBreakdown.Output.ReasoningTokens)
+	}
+}
+
+func TestStreamUsageBufferObserveClaudeStream_EstimatesThinkingTokens(t *testing.T) {
+	var buffer StreamUsageBuffer
+
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"message_start","message":{"id":"msg_123","model":"claude-opus-5","usage":{"input_tokens":100,"output_tokens":1}}}`))
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`))
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"First, consider the architecture. "}}`))
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Second, evaluate possible performance implications."}}`))
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"content_block_stop","index":0}`))
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`))
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Here is the solution."}}`))
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"content_block_stop","index":1}`))
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":60}}`))
+
+	detail, ok := buffer.Detail()
+	if !ok {
+		t.Fatal("expected buffer to have detail")
+	}
+	if detail.OutputTokens != 60 {
+		t.Fatalf("OutputTokens = %d, want 60", detail.OutputTokens)
+	}
+	if detail.ReasoningTokens <= 0 {
+		t.Fatalf("expected ReasoningTokens > 0, got %d", detail.ReasoningTokens)
+	}
+	if detail.ReasoningTokens >= 60 {
+		t.Fatalf("ReasoningTokens (%d) should be less than OutputTokens 60", detail.ReasoningTokens)
+	}
+	if detail.TokenBreakdown.Output.ReasoningTokens != detail.ReasoningTokens {
+		t.Fatalf("TokenBreakdown reasoning mismatch: %d != %d", detail.TokenBreakdown.Output.ReasoningTokens, detail.ReasoningTokens)
+	}
+	if detail.TokenBreakdown.Output.NonReasoningTokens+detail.TokenBreakdown.Output.ReasoningTokens != 60 {
+		t.Fatalf("TokenBreakdown output sum mismatch: %d + %d != 60",
+			detail.TokenBreakdown.Output.NonReasoningTokens, detail.TokenBreakdown.Output.ReasoningTokens)
+	}
+}
+
 func TestParseGeminiUsageNormalizesCachedContent(t *testing.T) {
 	detail := ParseGeminiUsage([]byte(`{"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":2,"cachedContentTokenCount":4,"totalTokenCount":12}}`))
 	if detail.CachedTokens != 4 {

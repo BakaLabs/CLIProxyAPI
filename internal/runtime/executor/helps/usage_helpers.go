@@ -896,6 +896,7 @@ type StreamUsageBuffer struct {
 	detail        usage.Detail
 	ok            bool
 	responseModel string
+	thinkingText  *strings.Builder
 }
 
 var (
@@ -962,11 +963,52 @@ func (b *StreamUsageBuffer) ObserveOpenAIStream(line []byte) {
 	b.Observe(detail, usageOK || detail.ResponseServiceTier != "")
 }
 
+func (b *StreamUsageBuffer) observeClaudeThinkingChunk(line []byte) {
+	if b == nil || len(line) == 0 || !bytes.Contains(line, []byte(`"thinking"`)) {
+		return
+	}
+	payload := jsonPayload(line)
+	if len(payload) == 0 || !gjson.ValidBytes(payload) {
+		return
+	}
+	switch gjson.GetBytes(payload, "type").String() {
+	case "content_block_delta":
+		if gjson.GetBytes(payload, "delta.type").String() == "thinking_delta" {
+			text := gjson.GetBytes(payload, "delta.thinking").String()
+			if text != "" {
+				if b.thinkingText == nil {
+					b.thinkingText = &strings.Builder{}
+				}
+				b.thinkingText.WriteString(text)
+			}
+		}
+	case "content_block_start":
+		if gjson.GetBytes(payload, "content_block.type").String() == "thinking" {
+			text := gjson.GetBytes(payload, "content_block.thinking").String()
+			if text != "" {
+				if b.thinkingText == nil {
+					b.thinkingText = &strings.Builder{}
+				}
+				b.thinkingText.WriteString(text)
+			}
+		}
+	}
+}
+
+func (b *StreamUsageBuffer) resolvedDetail() usage.Detail {
+	detail := b.detail
+	if detail.ReasoningTokens == 0 && b.thinkingText != nil && b.thinkingText.Len() > 0 && detail.OutputTokens > 0 {
+		detail = attachEstimatedClaudeThinkingTokens(detail, b.thinkingText.String())
+	}
+	return detail
+}
+
 // ObserveClaudeStream records and merges usage from a Claude SSE line.
 func (b *StreamUsageBuffer) ObserveClaudeStream(line []byte) {
 	if b == nil {
 		return
 	}
+	b.observeClaudeThinkingChunk(line)
 	if b.responseModel == "" {
 		if payload := jsonPayload(line); len(payload) > 0 {
 			if model, _ := extractClaudeResponseModelEvent(payload); model != "" {
@@ -987,7 +1029,7 @@ func (b *StreamUsageBuffer) Publish(ctx context.Context, reporter *UsageReporter
 	if b.responseModel != "" && reporter.ResponseModel() == "" {
 		reporter.SetResponseModel(b.responseModel)
 	}
-	reporter.Publish(ctx, b.detail)
+	reporter.Publish(ctx, b.resolvedDetail())
 	return true
 }
 
@@ -999,7 +1041,7 @@ func (b *StreamUsageBuffer) PublishFailure(ctx context.Context, reporter *UsageR
 	if b.responseModel != "" && reporter.ResponseModel() == "" {
 		reporter.SetResponseModel(b.responseModel)
 	}
-	reporter.PublishFailureWithDetail(ctx, b.detail, errs...)
+	reporter.PublishFailureWithDetail(ctx, b.resolvedDetail(), errs...)
 	return true
 }
 
@@ -1008,7 +1050,7 @@ func (b *StreamUsageBuffer) Detail() (usage.Detail, bool) {
 	if b == nil || !b.ok {
 		return usage.Detail{}, false
 	}
-	return b.detail, true
+	return b.resolvedDetail(), true
 }
 
 // ResponseModel returns the latest model observed in the stream buffer.
@@ -1180,7 +1222,62 @@ func ParseClaudeUsage(data []byte) usage.Detail {
 	if !usageNode.Exists() {
 		return usage.Detail{}
 	}
-	return parseClaudeUsageNode(usageNode)
+	detail := parseClaudeUsageNode(usageNode)
+	if detail.ReasoningTokens == 0 && detail.OutputTokens > 0 {
+		thinkingText := extractClaudeThinkingText(data)
+		if thinkingText != "" {
+			detail = attachEstimatedClaudeThinkingTokens(detail, thinkingText)
+		}
+	}
+	return detail
+}
+
+func extractClaudeThinkingText(data []byte) string {
+	if len(data) == 0 || !bytes.Contains(data, []byte(`"thinking"`)) {
+		return ""
+	}
+	contentNode := gjson.GetBytes(data, "content")
+	if !contentNode.Exists() {
+		contentNode = gjson.GetBytes(data, "message.content")
+	}
+	if !contentNode.IsArray() {
+		return ""
+	}
+	var sb strings.Builder
+	contentNode.ForEach(func(_, block gjson.Result) bool {
+		if block.Get("type").String() == "thinking" {
+			text := block.Get("thinking").String()
+			if text != "" {
+				sb.WriteString(text)
+			}
+		}
+		return true
+	})
+	return sb.String()
+}
+
+func attachEstimatedClaudeThinkingTokens(detail usage.Detail, thinkingText string) usage.Detail {
+	if detail.ReasoningTokens > 0 || thinkingText == "" || detail.OutputTokens <= 0 {
+		return detail
+	}
+	estimated := CountClaudeTextTokens(thinkingText)
+	if estimated <= 0 {
+		return detail
+	}
+	if estimated > detail.OutputTokens {
+		estimated = detail.OutputTokens
+	}
+	detail.ReasoningTokens = estimated
+	nonReasoningOutput := detail.OutputTokens - estimated
+	detail.TokenBreakdown = usage.NewIndependentTokenBreakdown(
+		detail.InputTokens,
+		detail.CacheReadTokens,
+		detail.CacheCreationTokens,
+		nonReasoningOutput,
+		detail.ReasoningTokens,
+		detail.TotalTokens,
+	)
+	return detail
 }
 
 func ParseClaudeStreamUsage(line []byte) (usage.Detail, bool) {
