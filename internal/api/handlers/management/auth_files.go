@@ -684,11 +684,23 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quota authFileQu
 	if modelQuotas := modelQuotaObservationPayload(auth.Provider, auth.ModelStates); len(modelQuotas) > 0 {
 		entry["model_quotas"] = modelQuotas
 	}
-	if pluginID := quota.pluginIDs[strings.ToLower(strings.TrimSpace(auth.Provider))]; pluginID != "" {
+	normProvider := strings.ToLower(strings.TrimSpace(auth.Provider))
+	if normProvider == "" && auth.Metadata != nil {
+		if t, ok := auth.Metadata["type"].(string); ok {
+			normProvider = strings.ToLower(strings.TrimSpace(t))
+		}
+	}
+	if pluginID := quota.pluginIDs[normProvider]; pluginID != "" {
 		entry["supports_quota"] = true
 		entry["quota_provider"] = auth.Provider
 		if quota.v8 {
 			entry["quota_plugin_id"] = pluginID
+		}
+	} else if isBuiltinQuotaProvider(normProvider) {
+		entry["supports_quota"] = true
+		entry["quota_provider"] = auth.Provider
+		if quota.v8 {
+			entry["quota_plugin_id"] = "builtin:" + normProvider
 		}
 	}
 	// Declarative quota_probe is only executed by the v0 quota/fetch route.

@@ -327,7 +327,7 @@ const zhCN = {
     noErrorFiles: "暂无错误日志文件",
   },
   quota: {
-    subtitle: "由插件提供的按凭据配额探测",
+    subtitle: "按凭据探测上游配额、限额窗口与重置冷却",
     loadAll: "全部获取",
     fetch: "获取",
     resetCooldown: "重置冷却",

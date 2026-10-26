@@ -49,11 +49,18 @@ func (h *Handler) GetQuotaProviders(c *gin.Context) {
 	h.mu.Lock()
 	host := h.pluginHost
 	h.mu.Unlock()
-	if host == nil {
-		c.JSON(http.StatusOK, gin.H{"providers": []any{}})
-		return
+	providers := make([]any, 0)
+	if host != nil {
+		for _, p := range host.QuotaProviders(c.Request.Context()) {
+			providers = append(providers, p)
+		}
 	}
-	c.JSON(http.StatusOK, gin.H{"providers": host.QuotaProviders(c.Request.Context())})
+	if !strings.HasPrefix(c.Request.URL.Path, "/v0/") {
+		for _, p := range builtinQuotaProviders() {
+			providers = append(providers, p)
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"providers": providers})
 }
 
 // FetchCredentialQuota retrieves normalized quota for a credential via its quota provider or declarative probe.
@@ -129,6 +136,17 @@ func (h *Handler) FetchCredentialQuota(c *gin.Context) {
 		}
 	}
 
+	// Fallback to built-in provider quota probing
+	handledBuiltin, builtinResp, errBuiltin := h.fetchBuiltinCredentialQuota(c.Request.Context(), auth, provider)
+	if handledBuiltin {
+		if errBuiltin != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("fetch quota failed: %v", errBuiltin)})
+			return
+		}
+		c.JSON(http.StatusOK, builtinResp)
+		return
+	}
+
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "no quota provider available for credential"})
 }
 
@@ -155,83 +173,112 @@ func (h *Handler) ResetCredentialQuota(c *gin.Context) {
 	host := h.pluginHost
 	h.mu.Unlock()
 
-	if host == nil {
-		c.JSON(http.StatusNotImplemented, gin.H{"error": "plugin host unavailable"})
-		return
-	}
-
 	pluginID := strings.TrimSpace(body.PluginID)
 	provider := strings.TrimSpace(body.Provider)
 	if provider == "" {
 		provider = auth.Provider
 	}
 
-	req := pluginapi.QuotaResetRequest{
-		AuthIndex:  auth.Index,
-		AuthID:     auth.ID,
-		Provider:   provider,
-		Metadata:   auth.Metadata,
-		Attributes: auth.Attributes,
+	if host != nil {
+		req := pluginapi.QuotaResetRequest{
+			AuthIndex:  auth.Index,
+			AuthID:     auth.ID,
+			Provider:   provider,
+			Metadata:   auth.Metadata,
+			Attributes: auth.Attributes,
+		}
+
+		var resetResp pluginapi.QuotaResetResponse
+		var handled bool
+		var errReset error
+
+		if pluginID != "" && !strings.HasPrefix(pluginID, "builtin:") {
+			if host.HasQuotaProviderForPlugin(pluginID) {
+				resetResp, handled, errReset = host.ResetQuotaByPlugin(c.Request.Context(), pluginID, req)
+				if handled {
+					if errReset != nil {
+						c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("plugin quota reset failed: %v", errReset)})
+						return
+					}
+					if !resetResp.Success {
+						msg := resetResp.Message
+						if msg == "" {
+							msg = "quota reset rejected by provider"
+						}
+						c.JSON(http.StatusBadGateway, gin.H{"error": msg})
+						return
+					}
+					if h.authManager != nil {
+						updated, _, errResetCore := h.authManager.ResetQuota(c.Request.Context(), auth.ID)
+						if errResetCore != nil {
+							c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to reset routing quota: %v", errResetCore)})
+							return
+						}
+						if updated != nil {
+							updated.EnsureIndex()
+						}
+					}
+					resp := gin.H{
+						"status":     "ok",
+						"auth_index": auth.Index,
+					}
+					if resetResp.Message != "" {
+						resp["message"] = resetResp.Message
+					}
+					c.JSON(http.StatusOK, resp)
+					return
+				}
+			}
+		} else if host.HasQuotaProviderContext(c.Request.Context(), provider) {
+			resetResp, handled, errReset = host.ResetQuota(c.Request.Context(), req)
+			if handled {
+				if errReset != nil {
+					c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("plugin quota reset failed: %v", errReset)})
+					return
+				}
+				if !resetResp.Success {
+					msg := resetResp.Message
+					if msg == "" {
+						msg = "quota reset rejected by provider"
+					}
+					c.JSON(http.StatusBadGateway, gin.H{"error": msg})
+					return
+				}
+				if h.authManager != nil {
+					updated, _, errResetCore := h.authManager.ResetQuota(c.Request.Context(), auth.ID)
+					if errResetCore != nil {
+						c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to reset routing quota: %v", errResetCore)})
+						return
+					}
+					if updated != nil {
+						updated.EnsureIndex()
+					}
+				}
+				resp := gin.H{
+					"status":     "ok",
+					"auth_index": auth.Index,
+				}
+				if resetResp.Message != "" {
+					resp["message"] = resetResp.Message
+				}
+				c.JSON(http.StatusOK, resp)
+				return
+			}
+		}
 	}
 
-	var resetResp pluginapi.QuotaResetResponse
-	var handled bool
-	var errReset error
-
-	if pluginID != "" {
-		if !host.HasQuotaProviderForPlugin(pluginID) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "quota provider not found for plugin"})
+	// Fallback to built-in provider reset
+	handledBuiltin, builtinResp, errBuiltin := h.resetBuiltinCredentialQuota(c.Request.Context(), auth, provider)
+	if handledBuiltin {
+		if errBuiltin != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("reset quota failed: %v", errBuiltin)})
 			return
 		}
-		resetResp, handled, errReset = host.ResetQuotaByPlugin(c.Request.Context(), pluginID, req)
-		if !handled {
-			c.JSON(http.StatusNotFound, gin.H{"error": "quota provider not found for plugin"})
-			return
-		}
-	} else {
-		if !host.HasQuotaProviderContext(c.Request.Context(), provider) {
-			c.JSON(http.StatusNotImplemented, gin.H{"error": "no quota provider available for credential to reset"})
-			return
-		}
-		resetResp, handled, errReset = host.ResetQuota(c.Request.Context(), req)
-		if !handled {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "quota provider did not handle reset request"})
-			return
-		}
-	}
-
-	if errReset != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("plugin quota reset failed: %v", errReset)})
+		c.JSON(http.StatusOK, builtinResp)
 		return
 	}
-	if !resetResp.Success {
-		msg := resetResp.Message
-		if msg == "" {
-			msg = "quota reset rejected by provider"
-		}
-		c.JSON(http.StatusBadGateway, gin.H{"error": msg})
-		return
-	}
 
-	if h.authManager != nil {
-		updated, _, errResetCore := h.authManager.ResetQuota(c.Request.Context(), auth.ID)
-		if errResetCore != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to reset routing quota: %v", errResetCore)})
-			return
-		}
-		if updated != nil {
-			updated.EnsureIndex()
-		}
-	}
-
-	resp := gin.H{
-		"status":     "ok",
-		"auth_index": auth.Index,
-	}
-	if resetResp.Message != "" {
-		resp["message"] = resetResp.Message
-	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusNotImplemented, gin.H{"error": "no quota provider available for credential to reset"})
 }
 
 // GetPluginQuota handles GET /v0/management/plugins/:id/quota?auth_index=...

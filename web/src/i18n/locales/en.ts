@@ -327,7 +327,7 @@ const en = {
     noErrorFiles: "No error log files",
   },
   quota: {
-    subtitle: "Per-credential quota probes provided by plugins",
+    subtitle: "Probe upstream quota, rate limit windows, and reset cooldown for credentials",
     loadAll: "Fetch all",
     fetch: "Fetch",
     resetCooldown: "Reset cooldown",
