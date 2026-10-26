@@ -3,6 +3,7 @@ package requestdb
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -242,6 +243,107 @@ func GetEntryDetail(ctx context.Context, id int64) (*Entry, error) {
 		return nil, ErrDisabled
 	}
 	return mgr.store.GetByID(ctx, id)
+}
+
+// CleanOptions configures a maintenance or cleanup operation.
+type CleanOptions struct {
+	Action       string `json:"action"` // "delete_before", "delete_failed", "strip_payloads", "cap_size", "clear_all", "vacuum"
+	BeforeDays   int    `json:"before_days,omitempty"`
+	BeforeMS     int64  `json:"before_ms,omitempty"`
+	TargetSizeMB int64  `json:"target_size_mb,omitempty"`
+	Vacuum       bool   `json:"vacuum,omitempty"`
+}
+
+// CleanResult reports the outcome of a cleanup operation.
+type CleanResult struct {
+	Action              string `json:"action"`
+	AffectedRows        int64  `json:"affected_rows"`
+	VacuumRun           bool   `json:"vacuum_run"`
+	FileSizeBytesBefore int64  `json:"file_size_bytes_before"`
+	FileSizeBytesAfter  int64  `json:"file_size_bytes_after"`
+}
+
+// GetStorageInfo returns disk and row usage statistics of the request database.
+func GetStorageInfo(ctx context.Context) (*StorageInfo, error) {
+	mu.Lock()
+	mgr := active
+	mu.Unlock()
+	if mgr == nil {
+		return nil, ErrDisabled
+	}
+	return mgr.store.StorageInfo(ctx, mgr.path, mgr.retentionDays.Load())
+}
+
+// Clean performs a storage maintenance/cleanup operation.
+func Clean(ctx context.Context, opts CleanOptions) (*CleanResult, error) {
+	mu.Lock()
+	mgr := active
+	mu.Unlock()
+	if mgr == nil {
+		return nil, ErrDisabled
+	}
+
+	infoBefore, err := mgr.store.StorageInfo(ctx, mgr.path, mgr.retentionDays.Load())
+	var sizeBefore int64
+	if err == nil && infoBefore != nil {
+		sizeBefore = infoBefore.TotalFileSizeBytes
+	}
+
+	var cutoffMS int64
+	if opts.BeforeDays > 0 {
+		cutoffMS = time.Now().Add(-time.Duration(opts.BeforeDays) * 24 * time.Hour).UnixMilli()
+	} else if opts.BeforeMS > 0 {
+		cutoffMS = opts.BeforeMS
+	}
+
+	var affected int64
+	var errClean error
+
+	switch opts.Action {
+	case "delete_before":
+		affected, errClean = mgr.store.DeleteBefore(ctx, cutoffMS)
+	case "delete_failed":
+		affected, errClean = mgr.store.DeleteFailed(ctx, cutoffMS)
+	case "strip_payloads":
+		affected, errClean = mgr.store.StripPayloads(ctx, cutoffMS)
+	case "cap_size":
+		targetBytes := opts.TargetSizeMB * 1024 * 1024
+		affected, errClean = mgr.store.PruneToSize(ctx, targetBytes, sizeBefore)
+	case "clear_all":
+		affected, errClean = mgr.store.ClearAll(ctx)
+	case "vacuum":
+		// Only vacuum
+		affected = 0
+	default:
+		return nil, fmt.Errorf("requestdb: unknown clean action: %s", opts.Action)
+	}
+
+	if errClean != nil {
+		return nil, errClean
+	}
+
+	vacuumRun := false
+	if opts.Vacuum || opts.Action == "vacuum" {
+		if errVac := mgr.store.Vacuum(ctx); errVac != nil {
+			log.WithError(errVac).Warn("requestdb: vacuum after cleanup failed")
+		} else {
+			vacuumRun = true
+		}
+	}
+
+	infoAfter, err := mgr.store.StorageInfo(ctx, mgr.path, mgr.retentionDays.Load())
+	var sizeAfter int64
+	if err == nil && infoAfter != nil {
+		sizeAfter = infoAfter.TotalFileSizeBytes
+	}
+
+	return &CleanResult{
+		Action:              opts.Action,
+		AffectedRows:        affected,
+		VacuumRun:           vacuumRun,
+		FileSizeBytesBefore: sizeBefore,
+		FileSizeBytesAfter:  sizeAfter,
+	}, nil
 }
 
 // writer batches entries and inserts them in background transactions.

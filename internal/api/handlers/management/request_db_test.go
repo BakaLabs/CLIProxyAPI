@@ -3,6 +3,7 @@ package management
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -100,6 +101,31 @@ func TestGetRequestDBRecordsDisabledReturns503(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodGet, "/records", nil)
 
 	handler.GetRequestDBRecords(c)
+	if c.Writer.Status() != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 when the request database is disabled", c.Writer.Status())
+	}
+}
+
+func TestGetRequestDBStorageDisabledReturns503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := &Handler{}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/storage", nil)
+
+	handler.GetRequestDBStorage(c)
+	if c.Writer.Status() != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 when the request database is disabled", c.Writer.Status())
+	}
+}
+
+func TestCleanRequestDBDisabledReturns503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := &Handler{}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/clean", strings.NewReader(`{"action":"vacuum"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.CleanRequestDB(c)
 	if c.Writer.Status() != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503 when the request database is disabled", c.Writer.Status())
 	}

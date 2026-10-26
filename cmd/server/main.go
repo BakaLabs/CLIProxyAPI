@@ -43,7 +43,7 @@ import (
 )
 
 var (
-	Version           = "dev"
+	Version           = "8.0.43-s2"
 	Commit            = "none"
 	BuildDate         = "unknown"
 	DefaultConfigPath = ""
@@ -55,7 +55,7 @@ const forkVersionSuffix = "-s"
 // init initializes the shared logger setup.
 func init() {
 	logging.SetupBaseLogger()
-	if strings.HasSuffix(Version, forkVersionSuffix) {
+	if strings.Contains(Version, forkVersionSuffix) {
 		buildinfo.Version = Version
 	} else {
 		buildinfo.Version = Version + forkVersionSuffix

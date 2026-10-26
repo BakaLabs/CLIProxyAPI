@@ -256,3 +256,36 @@ func requestDBErrorStatus(err error) int {
 	}
 	return 500
 }
+
+// GetRequestDBStorage returns disk, row, and compression usage statistics of the request database.
+func (h *Handler) GetRequestDBStorage(c *gin.Context) {
+	if h == nil {
+		c.JSON(500, gin.H{"error": "handler not initialized"})
+		return
+	}
+	info, err := requestdb.GetStorageInfo(c.Request.Context())
+	if err != nil {
+		c.JSON(requestDBErrorStatus(err), gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, info)
+}
+
+// CleanRequestDB performs maintenance/cleanup operations (retention, size cap, payload stripping, vacuum).
+func (h *Handler) CleanRequestDB(c *gin.Context) {
+	if h == nil {
+		c.JSON(500, gin.H{"error": "handler not initialized"})
+		return
+	}
+	var opts requestdb.CleanOptions
+	if err := c.ShouldBindJSON(&opts); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request body: " + err.Error()})
+		return
+	}
+	result, err := requestdb.Clean(c.Request.Context(), opts)
+	if err != nil {
+		c.JSON(requestDBErrorStatus(err), gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, result)
+}

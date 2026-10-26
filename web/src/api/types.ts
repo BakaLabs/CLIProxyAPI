@@ -62,6 +62,39 @@ export interface RequestRecordPage {
   has_more: boolean;
 }
 
+export interface RequestDBStorageInfo {
+  enabled: boolean;
+  path: string;
+  retention_days: number;
+  total_records: number;
+  failed_records: number;
+  payload_records: number;
+  earliest_record_ms: number;
+  latest_record_ms: number;
+  file_size_bytes: number;
+  wal_size_bytes: number;
+  total_file_size_bytes: number;
+  compressed_payload_bytes: number;
+  estimated_uncompressed_bytes: number;
+  compression_ratio: number;
+}
+
+export interface RequestDBCleanOptions {
+  action: "delete_before" | "delete_failed" | "strip_payloads" | "cap_size" | "clear_all" | "vacuum";
+  before_days?: number;
+  before_ms?: number;
+  target_size_mb?: number;
+  vacuum?: boolean;
+}
+
+export interface RequestDBCleanResult {
+  action: string;
+  affected_rows: number;
+  vacuum_run: boolean;
+  file_size_bytes_before: number;
+  file_size_bytes_after: number;
+}
+
 export interface TPSBucket {
   label: string;
   count: number;

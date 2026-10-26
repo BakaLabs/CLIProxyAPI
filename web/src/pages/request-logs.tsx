@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronUp, Download, EyeOff, Eye, Loader2, PauseCircle, PlayCircle, RadioTower, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { ChevronUp, Database, Download, EyeOff, Eye, Loader2, PauseCircle, PlayCircle, RadioTower, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Command, CommandItem, CommandList } from "@/components/ui/command";
@@ -124,6 +125,7 @@ function TokenMetricCell({ record }: { record: RequestRecord }) {
 
 export function RequestLogsPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [range, setRange] = useState<TimeRange>({ preset: usePrefsStore.getState().defaultRange });
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -192,6 +194,10 @@ export function RequestLogsPage() {
         <TimeRangeSelect value={range} onChange={setRange} />
         <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setMaskKeys(!maskKeys)} title={t("common.apiKey")}>
           {maskKeys ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+        </Button>
+        <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={() => navigate("/request-db")}>
+          <Database className="size-3.5" />
+          {t("nav.requestDb")}
         </Button>
         <Button variant="outline" size="sm" className="h-8 text-xs" onClick={exportCSV} disabled={liveState.records.length === 0}>
           <Download className="size-3.5" />

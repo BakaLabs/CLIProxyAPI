@@ -6,6 +6,7 @@ import { useAuthStore } from "@/stores/auth";
 import { LoginPage } from "@/pages/login";
 import { DashboardPage } from "@/pages/dashboard";
 import { RequestLogsPage } from "@/pages/request-logs";
+import { RequestDBPage } from "@/pages/request-db";
 import { ProvidersPage } from "@/pages/providers";
 import { AuthFilesPage } from "@/pages/auth-files";
 import { OAuthPage } from "@/pages/oauth";
@@ -43,6 +44,7 @@ export default function App() {
               <Route path="/" element={<DashboardPage />} />
               <Route path="/playground" element={<PlaygroundPage />} />
               <Route path="/request-logs" element={<RequestLogsPage />} />
+              <Route path="/request-db" element={<RequestDBPage />} />
               <Route path="/logs" element={<FileLogsPage />} />
               <Route path="/providers" element={<ProvidersPage />} />
               <Route path="/auth-files" element={<AuthFilesPage />} />

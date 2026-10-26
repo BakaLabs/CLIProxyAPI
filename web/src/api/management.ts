@@ -13,6 +13,9 @@ import type {
   PluginStoreItem,
   QuotaProviderInfo,
   RequestDBStats,
+  RequestDBStorageInfo,
+  RequestDBCleanOptions,
+  RequestDBCleanResult,
   RequestRecord,
   RequestRecordPage,
   ServerInfo,
@@ -108,6 +111,14 @@ export const requestDB = {
     }
     const query = params.toString();
     return `/observability/request-db/stream${query ? `?${query}` : ""}`;
+  },
+  async storage(): Promise<RequestDBStorageInfo> {
+    const { data } = await client.get("/observability/request-db/storage");
+    return data as RequestDBStorageInfo;
+  },
+  async clean(opts: RequestDBCleanOptions): Promise<RequestDBCleanResult> {
+    const { data } = await client.post("/observability/request-db/clean", opts);
+    return data as RequestDBCleanResult;
   },
 };
 

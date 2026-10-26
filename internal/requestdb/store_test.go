@@ -335,3 +335,95 @@ func TestStoreQueryMultiSelect(t *testing.T) {
 		t.Fatalf("Query(Providers) returned unexpected result: %v", gotP)
 	}
 }
+
+func TestStoreCleanupAndStorageInfo(t *testing.T) {
+	store, dbPath := openTestStore(t)
+	ctx := context.Background()
+
+	e1 := sampleEntry("clean-1", 1000)
+	e1.Failed = true
+	e1.TokenBreakdown = nil
+	e1.RequestHeaders = compressBlob([]byte(`{"authorization": "bearer foo"}`))
+	e1.ResponseHeaders = nil
+
+	e2 := sampleEntry("clean-2", 2000)
+	e2.Failed = false
+	e2.TokenBreakdown = nil
+	e2.RequestHeaders = compressBlob([]byte(`{"user-agent": "test-client"}`))
+	e2.ResponseHeaders = compressBlob([]byte(`{"content-type": "application/json"}`))
+
+	e3 := sampleEntry("clean-3", 5000)
+	e3.Failed = false
+	e3.TokenBreakdown = nil
+	e3.RequestHeaders = nil
+	e3.ResponseHeaders = nil
+	e3.ErrorBody = nil
+	e3.RequestPreview = nil
+	e3.ResponsePreview = nil
+
+	if err := store.InsertBatch(ctx, []Entry{e1, e2, e3}); err != nil {
+		t.Fatalf("InsertBatch() error = %v", err)
+	}
+
+	info, err := store.StorageInfo(ctx, dbPath, 30)
+	if err != nil {
+		t.Fatalf("StorageInfo() error = %v", err)
+	}
+	if info.TotalRecords != 3 {
+		t.Errorf("StorageInfo.TotalRecords = %d, want 3", info.TotalRecords)
+	}
+	if info.FailedRecords != 1 {
+		t.Errorf("StorageInfo.FailedRecords = %d, want 1", info.FailedRecords)
+	}
+	if info.PayloadRecords != 2 {
+		t.Errorf("StorageInfo.PayloadRecords = %d, want 2", info.PayloadRecords)
+	}
+	if info.TotalFileSizeBytes <= 0 {
+		t.Errorf("StorageInfo.TotalFileSizeBytes = %d, want > 0", info.TotalFileSizeBytes)
+	}
+
+	// 1. DeleteFailed
+	deletedFailed, err := store.DeleteFailed(ctx, 0)
+	if err != nil {
+		t.Fatalf("DeleteFailed() error = %v", err)
+	}
+	if deletedFailed != 1 {
+		t.Errorf("DeleteFailed() deleted %d rows, want 1", deletedFailed)
+	}
+
+	// 2. StripPayloads
+	stripped, err := store.StripPayloads(ctx, 0)
+	if err != nil {
+		t.Fatalf("StripPayloads() error = %v", err)
+	}
+	if stripped != 1 {
+		t.Errorf("StripPayloads() affected %d rows, want 1", stripped)
+	}
+
+	// Verify row still exists but headers are stripped
+	remaining, err := store.Count(ctx, Query{})
+	if err != nil || remaining != 2 {
+		t.Fatalf("Count() = %d, want 2", remaining)
+	}
+	detail, err := store.GetByID(ctx, 2)
+	if err != nil || detail == nil {
+		t.Fatalf("GetByID(2) error = %v", err)
+	}
+	if len(detail.RequestHeaders) != 0 || len(detail.ResponseHeaders) != 0 {
+		t.Errorf("GetByID(2) headers not stripped: %v, %v", detail.RequestHeaders, detail.ResponseHeaders)
+	}
+
+	// 3. Vacuum
+	if err := store.Vacuum(ctx); err != nil {
+		t.Fatalf("Vacuum() error = %v", err)
+	}
+
+	// 4. ClearAll
+	cleared, err := store.ClearAll(ctx)
+	if err != nil {
+		t.Fatalf("ClearAll() error = %v", err)
+	}
+	if cleared != 2 {
+		t.Errorf("ClearAll() deleted %d rows, want 2", cleared)
+	}
+}

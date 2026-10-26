@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -215,6 +216,222 @@ func (s *Store) DeleteBefore(ctx context.Context, cutoffMS int64) (int64, error)
 		return 0, fmt.Errorf("requestdb: read delete count: %w", err)
 	}
 	return deleted, nil
+}
+
+// StorageInfo summarizes the disk and row usage of the request database.
+type StorageInfo struct {
+	Enabled                    bool    `json:"enabled"`
+	Path                       string  `json:"path"`
+	RetentionDays              int64   `json:"retention_days"`
+	TotalRecords               int64   `json:"total_records"`
+	FailedRecords              int64   `json:"failed_records"`
+	PayloadRecords             int64   `json:"payload_records"`
+	EarliestRecordMS           int64   `json:"earliest_record_ms"`
+	LatestRecordMS             int64   `json:"latest_record_ms"`
+	FileSizeBytes              int64   `json:"file_size_bytes"`
+	WALSizeBytes               int64   `json:"wal_size_bytes"`
+	TotalFileSizeBytes         int64   `json:"total_file_size_bytes"`
+	CompressedPayloadBytes     int64   `json:"compressed_payload_bytes"`
+	EstimatedUncompressedBytes int64   `json:"estimated_uncompressed_bytes"`
+	CompressionRatio           float64 `json:"compression_ratio"`
+}
+
+// StorageInfo computes storage statistics including disk file size, compressed payload bytes,
+// and estimated uncompressed theoretical size.
+func (s *Store) StorageInfo(ctx context.Context, dbPath string, retentionDays int64) (*StorageInfo, error) {
+	if s == nil || s.db == nil {
+		return nil, ErrDisabled
+	}
+	info := &StorageInfo{
+		Enabled:       true,
+		Path:          dbPath,
+		RetentionDays: retentionDays,
+	}
+
+	if fi, err := os.Stat(dbPath); err == nil {
+		info.FileSizeBytes = fi.Size()
+	}
+	if fi, err := os.Stat(dbPath + "-wal"); err == nil {
+		info.WALSizeBytes = fi.Size()
+	}
+	info.TotalFileSizeBytes = info.FileSizeBytes + info.WALSizeBytes
+
+	row := s.db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN token_breakdown_zst IS NOT NULL OR request_headers_zst IS NOT NULL OR response_headers_zst IS NOT NULL OR error_body_zst IS NOT NULL OR request_preview_zst IS NOT NULL OR response_preview_zst IS NOT NULL THEN 1 ELSE 0 END), 0),
+			COALESCE(MIN(requested_at), 0),
+			COALESCE(MAX(requested_at), 0),
+			COALESCE(SUM(LENGTH(COALESCE(token_breakdown_zst, '')) + LENGTH(COALESCE(request_headers_zst, '')) + LENGTH(COALESCE(response_headers_zst, '')) + LENGTH(COALESCE(error_body_zst, '')) + LENGTH(COALESCE(request_preview_zst, '')) + LENGTH(COALESCE(response_preview_zst, ''))), 0)
+		FROM request_logs
+	`)
+	if err := row.Scan(
+		&info.TotalRecords,
+		&info.FailedRecords,
+		&info.PayloadRecords,
+		&info.EarliestRecordMS,
+		&info.LatestRecordMS,
+		&info.CompressedPayloadBytes,
+	); err != nil {
+		return nil, fmt.Errorf("requestdb: query storage metrics: %w", err)
+	}
+
+	// Sample up to 25 rows with non-empty payloads to compute empirical compression ratio
+	ratio := 3.5
+	if info.PayloadRecords > 0 {
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT token_breakdown_zst, request_headers_zst, response_headers_zst, error_body_zst, request_preview_zst, response_preview_zst
+			FROM request_logs
+			WHERE request_headers_zst IS NOT NULL OR token_breakdown_zst IS NOT NULL OR error_body_zst IS NOT NULL
+			LIMIT 25
+		`)
+		if err == nil {
+			var sampleCompressed int64
+			var sampleUncompressed int64
+			for rows.Next() {
+				var tb, reqH, respH, errB, reqP, respP []byte
+				if errScan := rows.Scan(&tb, &reqH, &respH, &errB, &reqP, &respP); errScan == nil {
+					for _, b := range [][]byte{tb, reqH, respH, errB, reqP, respP} {
+						if len(b) > 0 {
+							sampleCompressed += int64(len(b))
+							raw, errDecomp := decompressBlob(b)
+							if errDecomp == nil && len(raw) > 0 {
+								sampleUncompressed += int64(len(raw))
+							} else {
+								sampleUncompressed += int64(len(b)) * 3
+							}
+						}
+					}
+				}
+			}
+			_ = rows.Close()
+			if sampleCompressed > 0 && sampleUncompressed > 0 {
+				ratio = float64(sampleUncompressed) / float64(sampleCompressed)
+			}
+		}
+	}
+	info.CompressionRatio = ratio
+	info.EstimatedUncompressedBytes = int64(float64(info.CompressedPayloadBytes)*ratio) + info.TotalRecords*320
+	if info.EstimatedUncompressedBytes < info.TotalFileSizeBytes && info.TotalRecords > 0 {
+		info.EstimatedUncompressedBytes = int64(float64(info.TotalFileSizeBytes) * 1.5)
+	}
+	return info, nil
+}
+
+// DeleteFailed removes failed entries (optionally older than cutoffMS if cutoffMS > 0).
+func (s *Store) DeleteFailed(ctx context.Context, cutoffMS int64) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, ErrDisabled
+	}
+	query := "DELETE FROM request_logs WHERE failed = 1"
+	var args []any
+	if cutoffMS > 0 {
+		query += " AND requested_at < ?"
+		args = append(args, cutoffMS)
+	}
+	res, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("requestdb: delete failed entries: %w", err)
+	}
+	return res.RowsAffected()
+}
+
+// StripPayloads clears large blob columns (headers, previews, error body, token breakdown)
+// for records older than cutoffMS, preserving metadata and token counts for long-term analytics.
+func (s *Store) StripPayloads(ctx context.Context, cutoffMS int64) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, ErrDisabled
+	}
+	query := `UPDATE request_logs
+		SET token_breakdown_zst = NULL,
+		    request_headers_zst = NULL,
+		    response_headers_zst = NULL,
+		    error_body_zst = NULL,
+		    request_preview_zst = NULL,
+		    response_preview_zst = NULL
+		WHERE (token_breakdown_zst IS NOT NULL
+		    OR request_headers_zst IS NOT NULL
+		    OR response_headers_zst IS NOT NULL
+		    OR error_body_zst IS NOT NULL
+		    OR request_preview_zst IS NOT NULL
+		    OR response_preview_zst IS NOT NULL)`
+	var args []any
+	if cutoffMS > 0 {
+		query += " AND requested_at < ?"
+		args = append(args, cutoffMS)
+	}
+	res, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("requestdb: strip payloads: %w", err)
+	}
+	return res.RowsAffected()
+}
+
+// ClearAll deletes all request records from request_logs.
+func (s *Store) ClearAll(ctx context.Context) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, ErrDisabled
+	}
+	res, err := s.db.ExecContext(ctx, "DELETE FROM request_logs")
+	if err != nil {
+		return 0, fmt.Errorf("requestdb: clear all: %w", err)
+	}
+	return res.RowsAffected()
+}
+
+// PruneToSize deletes oldest records to bring total file size down towards targetBytes.
+func (s *Store) PruneToSize(ctx context.Context, targetBytes int64, currentBytes int64) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, ErrDisabled
+	}
+	if currentBytes <= targetBytes || targetBytes <= 0 {
+		return 0, nil
+	}
+	var totalRows int64
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM request_logs").Scan(&totalRows); err != nil {
+		return 0, fmt.Errorf("requestdb: prune count: %w", err)
+	}
+	if totalRows == 0 {
+		return 0, nil
+	}
+	excess := currentBytes - targetBytes
+	avgPerRow := currentBytes / totalRows
+	if avgPerRow <= 0 {
+		avgPerRow = 512
+	}
+	rowsToDelete := (excess / avgPerRow) * 115 / 100
+	if rowsToDelete < 1 {
+		rowsToDelete = 1
+	}
+	if rowsToDelete >= totalRows {
+		return s.ClearAll(ctx)
+	}
+
+	var cutoffID int64
+	err := s.db.QueryRowContext(ctx, "SELECT id FROM request_logs ORDER BY requested_at ASC, id ASC LIMIT 1 OFFSET ?", rowsToDelete-1).Scan(&cutoffID)
+	if err != nil {
+		return 0, fmt.Errorf("requestdb: prune find cutoff: %w", err)
+	}
+
+	res, err := s.db.ExecContext(ctx, "DELETE FROM request_logs WHERE id <= ?", cutoffID)
+	if err != nil {
+		return 0, fmt.Errorf("requestdb: prune delete: %w", err)
+	}
+	return res.RowsAffected()
+}
+
+// Vacuum checkpoints WAL and vacuums the SQLite database to reclaim free disk space.
+func (s *Store) Vacuum(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return ErrDisabled
+	}
+	_, _ = s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
+	if _, err := s.db.ExecContext(ctx, "VACUUM"); err != nil {
+		return fmt.Errorf("requestdb: vacuum: %w", err)
+	}
+	_, _ = s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
+	return nil
 }
 
 // Count returns the number of entries matching q.

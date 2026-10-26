@@ -6,6 +6,7 @@ import {
   BarChart3,
   Blocks,
   Coins,
+  Database,
   FileCode2,
   KeyRound,
   LayoutDashboard,
@@ -75,6 +76,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           <CommandItem onSelect={() => runCommand(() => navigate("/request-logs"))}>
             <Activity className="mr-2 size-4" />
             <span>{t("nav.requestLogs")}</span>
+          </CommandItem>
+          <CommandItem onSelect={() => runCommand(() => navigate("/request-db"))}>
+            <Database className="mr-2 size-4" />
+            <span>{t("nav.requestDb")}</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => navigate("/logs"))}>
             <ScrollText className="mr-2 size-4" />
