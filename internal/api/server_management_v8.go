@@ -49,6 +49,9 @@ func (s *Server) registerManagementV8Routes() {
 	v8.GET("/observability/request-db/storage", s.mgmt.GetRequestDBStorage)
 	v8.POST("/observability/request-db/clean", s.mgmt.CleanRequestDB)
 	v8.GET("/observability/model-prices", s.mgmt.GetModelPrices)
+	v8.POST("/observability/model-prices", s.mgmt.SetModelPrices)
+	v8.PUT("/observability/model-prices", s.mgmt.SetModelPrices)
+	v8.DELETE("/observability/model-prices", s.mgmt.DeleteModelPrice)
 
 	v8.GET("/credentials", s.mgmt.ListAuthFiles)
 	v8.POST("/credentials", s.mgmt.UploadAuthFileV8)

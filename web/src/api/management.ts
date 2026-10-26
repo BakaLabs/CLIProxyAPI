@@ -7,6 +7,7 @@ import type {
   LogLinesResponse,
   ModelInfo,
   ModelPrice,
+  ModelPricesResponse,
   OAuthPollStatus,
   OAuthStartResponse,
   PluginInfo,
@@ -98,9 +99,22 @@ export const requestDB = {
     const { data } = await client.get("/observability/request-db/breakdown", { params });
     return (data as { rows: BreakdownRow[] }).rows;
   },
-  async modelPrices(): Promise<{ prices: Record<string, ModelPrice>; count: number }> {
+  async modelPrices(): Promise<ModelPricesResponse> {
     const { data } = await client.get("/observability/model-prices");
-    return data as { prices: Record<string, ModelPrice>; count: number };
+    return data as ModelPricesResponse;
+  },
+  async setModelPrice(payload: {
+    model: string;
+    input_cost_per_token: number;
+    output_cost_per_token: number;
+    cache_read_cost_per_token?: number;
+  }): Promise<{ message: string; model?: string; custom_prices: Record<string, ModelPrice> }> {
+    const { data } = await client.post("/observability/model-prices", payload);
+    return data as { message: string; model?: string; custom_prices: Record<string, ModelPrice> };
+  },
+  async deleteModelPrice(model: string): Promise<{ message: string; model: string; custom_prices: Record<string, ModelPrice> }> {
+    const { data } = await client.delete("/observability/model-prices", { params: { model } });
+    return data as { message: string; model: string; custom_prices: Record<string, ModelPrice> };
   },
   streamPath(filter: RecordFilter): string {
     const params = new URLSearchParams();

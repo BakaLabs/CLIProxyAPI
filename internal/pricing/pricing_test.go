@@ -92,3 +92,79 @@ func TestCachePersistence(t *testing.T) {
 		t.Fatalf("mgr2.GetPrice() = %v, ok=%v, want 0.01", p, ok)
 	}
 }
+
+func TestCustomPriceOverrides(t *testing.T) {
+	tempDir := t.TempDir()
+	cachePath := filepath.Join(tempDir, "prices.json")
+
+	mgr := NewManager(cachePath)
+
+	// 1. Model that doesn't exist anywhere
+	customModel := "custom-zero-cost-model"
+	if _, ok := mgr.GetPrice(customModel); ok {
+		t.Fatalf("expected %s to have no price initially", customModel)
+	}
+
+	customPrice := ModelPrice{
+		InputCostPerToken:     0.000005,
+		OutputCostPerToken:    0.000015,
+		CacheReadCostPerToken: 0.000001,
+	}
+
+	if err := mgr.SetCustomPrice(customModel, customPrice); err != nil {
+		t.Fatalf("SetCustomPrice failed: %v", err)
+	}
+
+	gotPrice, ok := mgr.GetPrice(customModel)
+	if !ok || gotPrice.InputCostPerToken != 0.000005 {
+		t.Fatalf("GetPrice() = %v, ok=%v; want %v", gotPrice, ok, customPrice)
+	}
+
+	// Verify it's in GetCustomPrices
+	customs := mgr.GetCustomPrices()
+	if _, exists := customs[customModel]; !exists {
+		t.Fatalf("expected %s in GetCustomPrices()", customModel)
+	}
+
+	// 2. Persistence test across new Manager instance
+	mgr2 := NewManager(cachePath)
+	gotPrice2, ok2 := mgr2.GetPrice(customModel)
+	if !ok2 || gotPrice2.InputCostPerToken != 0.000005 {
+		t.Fatalf("mgr2.GetPrice() = %v, ok=%v; want persisted custom price", gotPrice2, ok2)
+	}
+	customs2 := mgr2.GetCustomPrices()
+	if _, exists := customs2[customModel]; !exists {
+		t.Fatalf("expected %s in mgr2.GetCustomPrices()", customModel)
+	}
+
+	// 3. Test deleting custom price
+	if err := mgr2.DeleteCustomPrice(customModel); err != nil {
+		t.Fatalf("DeleteCustomPrice failed: %v", err)
+	}
+	if _, ok := mgr2.GetPrice(customModel); ok {
+		t.Fatalf("expected %s to be deleted from prices", customModel)
+	}
+	if _, ok := mgr2.GetCustomPrices()[customModel]; ok {
+		t.Fatalf("expected %s to be deleted from custom prices", customModel)
+	}
+
+	// 4. Overriding an existing seed model (e.g. gpt-4o) and reverting
+	origGpt4o, _ := mgr2.GetPrice("gpt-4o")
+	overridePrice := ModelPrice{InputCostPerToken: 99.0, OutputCostPerToken: 99.0}
+	if err := mgr2.SetCustomPrice("gpt-4o", overridePrice); err != nil {
+		t.Fatalf("SetCustomPrice gpt-4o failed: %v", err)
+	}
+	gotGpt4o, _ := mgr2.GetPrice("gpt-4o")
+	if gotGpt4o.InputCostPerToken != 99.0 {
+		t.Fatalf("expected custom override 99.0, got %v", gotGpt4o.InputCostPerToken)
+	}
+
+	// Delete override should revert to default seed price
+	if err := mgr2.DeleteCustomPrice("gpt-4o"); err != nil {
+		t.Fatalf("DeleteCustomPrice gpt-4o failed: %v", err)
+	}
+	revertedGpt4o, _ := mgr2.GetPrice("gpt-4o")
+	if revertedGpt4o.InputCostPerToken != origGpt4o.InputCostPerToken {
+		t.Fatalf("expected reverted price %v, got %v", origGpt4o.InputCostPerToken, revertedGpt4o.InputCostPerToken)
+	}
+}

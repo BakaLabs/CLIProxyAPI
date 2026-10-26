@@ -103,7 +103,13 @@ export interface TPSBucket {
 export interface ModelPrice {
   input_cost_per_token: number;
   output_cost_per_token: number;
-  cache_read_cost_per_token: number;
+  cache_read_cost_per_token?: number;
+}
+
+export interface ModelPricesResponse {
+  prices: Record<string, ModelPrice>;
+  custom_prices?: Record<string, ModelPrice>;
+  count: number;
 }
 
 export interface RequestDBStats {

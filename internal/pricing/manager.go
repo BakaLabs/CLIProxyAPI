@@ -3,8 +3,10 @@ package pricing
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,9 +20,11 @@ const (
 
 // Manager coordinates model pricing lookup, caching, and background refreshing.
 type Manager struct {
-	mu        sync.RWMutex
-	prices    map[string]ModelPrice
-	cachePath string
+	mu           sync.RWMutex
+	prices       map[string]ModelPrice
+	customPrices map[string]ModelPrice
+	cachePath    string
+	customPath   string
 }
 
 var (
@@ -43,14 +47,24 @@ func NewManager(cachePath string) *Manager {
 		initial[k] = v
 	}
 
+	var customPath string
+	if cachePath != "" {
+		customPath = filepath.Join(filepath.Dir(cachePath), "custom_model_prices.json")
+	}
+
 	m := &Manager{
-		prices:    initial,
-		cachePath: cachePath,
+		prices:       initial,
+		customPrices: make(map[string]ModelPrice),
+		cachePath:    cachePath,
+		customPath:   customPath,
 	}
 
 	// If a cache file exists, load it
 	if cachePath != "" {
 		m.loadCache(cachePath)
+	}
+	if customPath != "" {
+		m.loadCustomPrices(customPath)
 	}
 
 	return m
@@ -58,12 +72,21 @@ func NewManager(cachePath string) *Manager {
 
 // SetCachePath updates the disk cache path and loads existing cached prices if present.
 func (m *Manager) SetCachePath(path string) {
+	var customPath string
+	if path != "" {
+		customPath = filepath.Join(filepath.Dir(path), "custom_model_prices.json")
+	}
+
 	m.mu.Lock()
 	m.cachePath = path
+	m.customPath = customPath
 	m.mu.Unlock()
 
 	if path != "" {
 		m.loadCache(path)
+	}
+	if customPath != "" {
+		m.loadCustomPrices(customPath)
 	}
 }
 
@@ -84,6 +107,101 @@ func (m *Manager) GetAllPrices() map[string]ModelPrice {
 		copyMap[k] = v
 	}
 	return copyMap
+}
+
+// GetCustomPrices returns a copy of all manually configured model price overrides.
+func (m *Manager) GetCustomPrices() map[string]ModelPrice {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	copyMap := make(map[string]ModelPrice, len(m.customPrices))
+	for k, v := range m.customPrices {
+		copyMap[k] = v
+	}
+	return copyMap
+}
+
+// SetCustomPrice sets or updates a manually configured model price.
+// It persists the custom price to disk if customPath is configured.
+func (m *Manager) SetCustomPrice(model string, price ModelPrice) error {
+	key := strings.ToLower(strings.TrimSpace(model))
+	if key == "" {
+		return errors.New("pricing: model name cannot be empty")
+	}
+	if price.InputCostPerToken < 0 || price.OutputCostPerToken < 0 || price.CacheReadCostPerToken < 0 {
+		return errors.New("pricing: token cost cannot be negative")
+	}
+
+	m.mu.Lock()
+	m.customPrices[key] = price
+	m.prices[key] = price
+
+	customPath := m.customPath
+	cachePath := m.cachePath
+	snapshotCustom := make(map[string]ModelPrice, len(m.customPrices))
+	for k, v := range m.customPrices {
+		snapshotCustom[k] = v
+	}
+	snapshotAll := make(map[string]ModelPrice, len(m.prices))
+	for k, v := range m.prices {
+		snapshotAll[k] = v
+	}
+	m.mu.Unlock()
+
+	if customPath != "" {
+		if err := saveCache(customPath, snapshotCustom); err != nil {
+			log.WithError(err).Warn("pricing: failed to save custom prices file")
+			return err
+		}
+	}
+	if cachePath != "" {
+		_ = saveCache(cachePath, snapshotAll)
+	}
+
+	return nil
+}
+
+// DeleteCustomPrice removes a manually configured model price override.
+func (m *Manager) DeleteCustomPrice(model string) error {
+	key := strings.ToLower(strings.TrimSpace(model))
+	if key == "" {
+		return errors.New("pricing: model name cannot be empty")
+	}
+
+	m.mu.Lock()
+	delete(m.customPrices, key)
+
+	// If the model exists in default seed prices, revert to the default price.
+	// Otherwise, delete it from the active catalog.
+	if defPrice, ok := defaultPrices[key]; ok {
+		m.prices[key] = defPrice
+	} else {
+		delete(m.prices, key)
+	}
+
+	customPath := m.customPath
+	cachePath := m.cachePath
+	snapshotCustom := make(map[string]ModelPrice, len(m.customPrices))
+	for k, v := range m.customPrices {
+		snapshotCustom[k] = v
+	}
+	snapshotAll := make(map[string]ModelPrice, len(m.prices))
+	for k, v := range m.prices {
+		snapshotAll[k] = v
+	}
+	m.mu.Unlock()
+
+	if customPath != "" {
+		if err := saveCache(customPath, snapshotCustom); err != nil {
+			log.WithError(err).Warn("pricing: failed to save custom prices file after deletion")
+			return err
+		}
+	}
+	if cachePath != "" {
+		_ = saveCache(cachePath, snapshotAll)
+	}
+
+	return nil
 }
 
 // CalculateCost computes total estimated USD cost for token usage on a model.
@@ -154,6 +272,10 @@ func (m *Manager) refresh(ctx context.Context) {
 			m.prices[k] = v
 		}
 	}
+	// Re-apply custom price overrides to ensure manual prices are preserved
+	for k, v := range m.customPrices {
+		m.prices[k] = v
+	}
 	cachePath := m.cachePath
 	snapshot := make(map[string]ModelPrice, len(m.prices))
 	for k, v := range m.prices {
@@ -198,7 +320,38 @@ func (m *Manager) loadCache(path string) {
 			m.prices[k] = v
 		}
 	}
+	// Re-verify custom overrides
+	for k, v := range m.customPrices {
+		m.prices[k] = v
+	}
 	log.Infof("pricing: loaded %d model prices from local cache (%s)", len(cached), path)
+}
+
+func (m *Manager) loadCustomPrices(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.WithError(err).Warn("pricing: failed to read custom price cache file")
+		}
+		return
+	}
+
+	var custom map[string]ModelPrice
+	if err := json.Unmarshal(data, &custom); err != nil {
+		log.WithError(err).Warn("pricing: failed to parse custom model prices")
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, v := range custom {
+		key := strings.ToLower(strings.TrimSpace(k))
+		if key != "" {
+			m.customPrices[key] = v
+			m.prices[key] = v
+		}
+	}
+	log.Infof("pricing: loaded %d custom model prices from %s", len(custom), path)
 }
 
 func saveCache(path string, prices map[string]ModelPrice) error {

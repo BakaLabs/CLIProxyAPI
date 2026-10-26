@@ -64,6 +64,7 @@ import {
 import { errStatus, type BreakdownRow } from "@/api/types";
 import { usePrefsStore, type TimeRange } from "@/stores/prefs";
 import type { RecordFilter } from "@/api/management";
+import { ModelPricingDialog } from "@/components/model-pricing-dialog";
 
 const chartConfig = {
   requests: { label: "Requests", color: "var(--chart-1)" },
@@ -88,6 +89,10 @@ export function DashboardPage() {
   // Multi-dimensional filters
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
+
+  // Manual Model Pricing Dialog State
+  const [pricingModalOpen, setPricingModalOpen] = useState(false);
+  const [pricingTargetModel, setPricingTargetModel] = useState<string>("");
 
   // Query options for comboboxes (unfiltered within the same time range)
   const baseRangeFilter = useMemo<RecordFilter>(() => ({}), []);
@@ -126,6 +131,15 @@ export function DashboardPage() {
   const clearAllFilters = () => {
     setSelectedModels([]);
     setSelectedProviders([]);
+  };
+
+  const observedModelNames = useMemo(() => {
+    return (availableModelsQuery.data ?? []).map((row) => row.key);
+  }, [availableModelsQuery.data]);
+
+  const handleOpenPricing = (model?: string) => {
+    setPricingTargetModel(model ?? "");
+    setPricingModalOpen(true);
   };
 
   const hasActiveFilters = selectedModels.length > 0 || selectedProviders.length > 0;
@@ -168,6 +182,15 @@ export function DashboardPage() {
   return (
     <>
       <PageHeader title={t("dashboard.title")} subtitle={t("dashboard.subtitle")}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1.5 rounded-xl text-xs cursor-pointer text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/10"
+          onClick={() => handleOpenPricing()}
+        >
+          <Coins className="size-3.5 text-amber-500" />
+          <span>{t("dashboard.pricing.button", "模型价格")}</span>
+        </Button>
         <label className="text-muted-foreground flex items-center gap-2 text-sm">
           {t("common.autoRefresh")}
           <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
@@ -288,9 +311,19 @@ export function DashboardPage() {
           label={t("dashboard.kpi.cost", "预估总花费")}
           value={formatUSD(stats.data?.estimated_cost_usd)}
           sub={
-            <span className="font-mono text-xs">
-              日均 ~{formatUSD(dailyCost)} · {formatInt(stats.data?.total_requests)} 次调用
-            </span>
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-xs">
+                日均 ~{formatUSD(dailyCost)} · {formatInt(stats.data?.total_requests)} 次调用
+              </span>
+              <button
+                type="button"
+                onClick={() => handleOpenPricing()}
+                className="cursor-pointer text-[10px] text-primary hover:underline ml-1"
+                title="管理模型价格"
+              >
+                {t("dashboard.pricing.configurePrice", "设置价格")}
+              </button>
+            </div>
           }
           icon={Coins}
           loading={stats.isLoading}
@@ -490,8 +523,16 @@ export function DashboardPage() {
           modelsLoading={models.isLoading}
           providersLoading={providers.isLoading}
           totalRequests={stats.data?.total_requests ?? 0}
+          onConfigureModelPrice={handleOpenPricing}
         />
       </div>
+
+      <ModelPricingDialog
+        open={pricingModalOpen}
+        onOpenChange={setPricingModalOpen}
+        initialModel={pricingTargetModel}
+        observedModels={observedModelNames}
+      />
 
       {updated ? <p className="text-muted-foreground mt-4 text-center text-xs">{updated}</p> : null}
     </>
@@ -506,6 +547,7 @@ interface ComprehensiveBreakdownTableProps {
   modelsLoading: boolean;
   providersLoading: boolean;
   totalRequests: number;
+  onConfigureModelPrice?: (model: string) => void;
 }
 
 function ComprehensiveBreakdownTable({
@@ -514,6 +556,7 @@ function ComprehensiveBreakdownTable({
   modelsLoading,
   providersLoading,
   totalRequests,
+  onConfigureModelPrice,
 }: ComprehensiveBreakdownTableProps) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<"model" | "provider">("model");
@@ -642,6 +685,19 @@ function ComprehensiveBreakdownTable({
             ) : null}
           </div>
 
+          {/* Model Pricing Shortcut Button */}
+          {activeTab === "model" && onConfigureModelPrice && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onConfigureModelPrice("")}
+              className="h-8 gap-1.5 text-xs text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/10 cursor-pointer"
+            >
+              <Coins className="size-3.5 text-amber-500" />
+              <span>{t("dashboard.pricing.button", "模型价格")}</span>
+            </Button>
+          )}
+
           {/* Export CSV */}
           <Button
             variant="outline"
@@ -743,7 +799,35 @@ function ComprehensiveBreakdownTable({
 
                     {/* Cost */}
                     <td className="py-2.5 text-right font-mono tabular-nums font-semibold text-sky-600 dark:text-sky-400">
-                      {formatUSD(row.estimated_cost_usd)}
+                      <div className="flex items-center justify-end gap-1.5">
+                        <span>{formatUSD(row.estimated_cost_usd)}</span>
+                        {activeTab === "model" && onConfigureModelPrice && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onConfigureModelPrice(row.key);
+                            }}
+                            title={
+                              (row.estimated_cost_usd ?? 0) === 0
+                                ? "外部来源未收录或单价为 0，点击手动设置价格"
+                                : "点击调整该模型单价"
+                            }
+                            className={`cursor-pointer inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-sans font-normal transition-all ${
+                              (row.estimated_cost_usd ?? 0) === 0
+                                ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 font-medium shadow-2xs"
+                                : "text-muted-foreground/60 hover:text-primary hover:bg-primary/10"
+                            }`}
+                          >
+                            <Coins className="size-2.5" />
+                            <span>
+                              {(row.estimated_cost_usd ?? 0) === 0
+                                ? t("dashboard.pricing.notPriced", "未定价")
+                                : t("dashboard.pricing.configurePrice", "设置价格")}
+                            </span>
+                          </button>
+                        )}
+                      </div>
                     </td>
 
                     {/* Requests & Share */}

@@ -115,6 +115,8 @@ type SortMode = "enabled" | "priority" | "name";
 type ViewMode = "cards" | "table";
 type StatusFilter = "all" | "enabled" | "disabled";
 
+const STORAGE_KEY_PROVIDERS_VIEW_MODE = "cpa-providers-view-mode";
+
 export function ProvidersPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -131,7 +133,26 @@ export function ProvidersPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("enabled");
-  const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_PROVIDERS_VIEW_MODE);
+      if (saved === "cards" || saved === "table") {
+        return saved;
+      }
+    } catch {
+      // ignore
+    }
+    return "cards";
+  });
+
+  const handleViewModeChange = (mode: ViewMode) => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem(STORAGE_KEY_PROVIDERS_VIEW_MODE, mode);
+    } catch {
+      // ignore
+    }
+  };
   const [compatEditing, setCompatEditing] = useState<{ index: number; provider: CompatProvider } | null>(null);
   const [keyEditing, setKeyEditing] = useState<{ kind: KindMeta; index: number; entry: Entry } | null>(null);
   const [secondary, setSecondary] = useState<"alias" | "excluded" | "keys" | null>(null);
@@ -410,7 +431,7 @@ export function ProvidersPage() {
         <div className="flex items-center rounded-xl border border-slate-200/80 bg-white p-0.5 dark:border-slate-800 dark:bg-slate-900 shadow-2xs">
           <button
             type="button"
-            onClick={() => setViewMode("cards")}
+            onClick={() => handleViewModeChange("cards")}
             className={`flex size-7.5 items-center justify-center rounded-lg transition ${
               viewMode === "cards" ? "bg-blue-600 text-white shadow-xs" : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-100"
             }`}
@@ -420,7 +441,7 @@ export function ProvidersPage() {
           </button>
           <button
             type="button"
-            onClick={() => setViewMode("table")}
+            onClick={() => handleViewModeChange("table")}
             className={`flex size-7.5 items-center justify-center rounded-lg transition ${
               viewMode === "table" ? "bg-blue-600 text-white shadow-xs" : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-100"
             }`}

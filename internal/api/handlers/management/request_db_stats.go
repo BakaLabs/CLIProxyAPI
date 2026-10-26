@@ -3,6 +3,7 @@ package management
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -280,11 +281,124 @@ func writeSSEEvent(writer gin.ResponseWriter, event string, payload any) bool {
 	return true
 }
 
-// GetModelPrices returns the loaded model prices catalog.
+// GetModelPrices returns the loaded model prices catalog, including custom overrides.
 func (h *Handler) GetModelPrices(c *gin.Context) {
 	prices := pricing.Global().GetAllPrices()
-	c.JSON(200, gin.H{
-		"prices": prices,
-		"count":  len(prices),
+	customPrices := pricing.Global().GetCustomPrices()
+	c.JSON(http.StatusOK, gin.H{
+		"prices":        prices,
+		"custom_prices": customPrices,
+		"count":         len(prices),
+	})
+}
+
+type setModelPriceRequest struct {
+	Model                 string                        `json:"model"`
+	InputCostPerToken     *float64                      `json:"input_cost_per_token"`
+	OutputCostPerToken    *float64                      `json:"output_cost_per_token"`
+	CacheReadCostPerToken *float64                      `json:"cache_read_cost_per_token"`
+	Price                 *pricing.ModelPrice           `json:"price"`
+	Prices                map[string]pricing.ModelPrice `json:"prices"`
+}
+
+// SetModelPrices updates or adds custom model pricing overrides.
+func (h *Handler) SetModelPrices(c *gin.Context) {
+	var req setModelPriceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+		return
+	}
+
+	mgr := pricing.Global()
+
+	// Batch update mode
+	if len(req.Prices) > 0 {
+		for model, p := range req.Prices {
+			trimmed := strings.TrimSpace(model)
+			if trimmed == "" {
+				continue
+			}
+			if p.InputCostPerToken < 0 || p.OutputCostPerToken < 0 || p.CacheReadCostPerToken < 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "token costs cannot be negative"})
+				return
+			}
+			if err := mgr.SetCustomPrice(trimmed, p); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message":       "prices updated",
+			"custom_prices": mgr.GetCustomPrices(),
+		})
+		return
+	}
+
+	// Single model mode
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model name is required"})
+		return
+	}
+
+	var p pricing.ModelPrice
+	if req.Price != nil {
+		p = *req.Price
+	} else {
+		if req.InputCostPerToken != nil {
+			p.InputCostPerToken = *req.InputCostPerToken
+		}
+		if req.OutputCostPerToken != nil {
+			p.OutputCostPerToken = *req.OutputCostPerToken
+		}
+		if req.CacheReadCostPerToken != nil {
+			p.CacheReadCostPerToken = *req.CacheReadCostPerToken
+		}
+	}
+
+	if p.InputCostPerToken < 0 || p.OutputCostPerToken < 0 || p.CacheReadCostPerToken < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "token costs cannot be negative"})
+		return
+	}
+
+	if err := mgr.SetCustomPrice(model, p); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":       "price updated",
+		"model":         model,
+		"price":         p,
+		"custom_prices": mgr.GetCustomPrices(),
+	})
+}
+
+// DeleteModelPrice removes a custom price override for a model.
+func (h *Handler) DeleteModelPrice(c *gin.Context) {
+	model := strings.TrimSpace(c.Query("model"))
+	if model == "" {
+		var body struct {
+			Model string `json:"model"`
+		}
+		if err := c.ShouldBindJSON(&body); err == nil {
+			model = strings.TrimSpace(body.Model)
+		}
+	}
+
+	if model == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model parameter is required"})
+		return
+	}
+
+	if err := pricing.Global().DeleteCustomPrice(model); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":       "custom price deleted",
+		"model":         model,
+		"custom_prices": pricing.Global().GetCustomPrices(),
 	})
 }

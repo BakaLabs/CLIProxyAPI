@@ -130,3 +130,48 @@ func TestCleanRequestDBDisabledReturns503(t *testing.T) {
 		t.Fatalf("status = %d, want 503 when the request database is disabled", c.Writer.Status())
 	}
 }
+
+func TestModelPricesManagementHandlers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := &Handler{}
+
+	// 1. Set a custom model price
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/observability/model-prices", strings.NewReader(`{
+		"model": "test-custom-llm",
+		"input_cost_per_token": 0.000003,
+		"output_cost_per_token": 0.000012,
+		"cache_read_cost_per_token": 0.000001
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.SetModelPrices(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("SetModelPrices status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	// 2. Get model prices and verify custom price is present
+	wGet := httptest.NewRecorder()
+	cGet, _ := gin.CreateTestContext(wGet)
+	cGet.Request = httptest.NewRequest(http.MethodGet, "/observability/model-prices", nil)
+
+	handler.GetModelPrices(cGet)
+	if wGet.Code != http.StatusOK {
+		t.Fatalf("GetModelPrices status = %d, want 200: %s", wGet.Code, wGet.Body.String())
+	}
+	bodyStr := wGet.Body.String()
+	if !strings.Contains(bodyStr, "test-custom-llm") {
+		t.Fatalf("GetModelPrices body should contain test-custom-llm, got: %s", bodyStr)
+	}
+
+	// 3. Delete custom model price
+	wDel := httptest.NewRecorder()
+	cDel, _ := gin.CreateTestContext(wDel)
+	cDel.Request = httptest.NewRequest(http.MethodDelete, "/observability/model-prices?model=test-custom-llm", nil)
+
+	handler.DeleteModelPrice(cDel)
+	if wDel.Code != http.StatusOK {
+		t.Fatalf("DeleteModelPrice status = %d, want 200: %s", wDel.Code, wDel.Body.String())
+	}
+}
