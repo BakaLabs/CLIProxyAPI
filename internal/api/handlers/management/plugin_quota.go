@@ -114,6 +114,7 @@ func (h *Handler) FetchCredentialQuota(c *gin.Context) {
 				c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("failed to fetch quota: %v", errFetch)})
 				return
 			}
+			h.recordManualQuota(auth, quotaResp)
 			c.JSON(http.StatusOK, quotaResp)
 			return
 		}
@@ -129,6 +130,7 @@ func (h *Handler) FetchCredentialQuota(c *gin.Context) {
 						c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("quota probe failed: %v", errProbe)})
 						return
 					}
+					h.recordManualQuota(auth, quotaResp)
 					c.JSON(http.StatusOK, quotaResp)
 					return
 				}
@@ -143,6 +145,7 @@ func (h *Handler) FetchCredentialQuota(c *gin.Context) {
 			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("fetch quota failed: %v", errBuiltin)})
 			return
 		}
+		h.recordManualQuota(auth, builtinResp)
 		c.JSON(http.StatusOK, builtinResp)
 		return
 	}

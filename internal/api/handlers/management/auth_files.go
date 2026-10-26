@@ -681,6 +681,14 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quota authFileQu
 	entry["failed"] = auth.Failed
 	entry["recent_requests"] = auth.RecentRequestsSnapshot(time.Now())
 	entry["quota"] = quotaObservationPayloadForProvider(auth.Provider, auth.Quota)
+	if mq := h.getManualQuota(auth); mq != nil {
+		entry["manual_quota"] = gin.H{
+			"data":         mq.Data,
+			"fetched_at":   mq.FetchedAt.Format(time.RFC3339),
+			"base_success": mq.BaseSuccess,
+			"base_failed":  mq.BaseFailed,
+		}
+	}
 	if modelQuotas := modelQuotaObservationPayload(auth.Provider, auth.ModelStates); len(modelQuotas) > 0 {
 		entry["model_quotas"] = modelQuotas
 	}

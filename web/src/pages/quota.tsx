@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, Code2, Coins, Loader2, RefreshCw, RotateCcw } from "lucide-react";
 import dayjs from "dayjs";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { JsonView, SectionCard } from "@/components/shared/misc";
 import { credentials, quota } from "@/api/management";
 import { errMessage, type AuthFileEntry } from "@/api/types";
+import { getCachedQuota, saveCachedQuota } from "@/lib/quota-store";
 import { cn } from "@/lib/utils";
 
 interface QuotaResult {
@@ -46,6 +47,7 @@ function formatQuotaResetTime(raw: string | number | undefined | null): string {
 
 export function QuotaPage() {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const files = useQuery({ queryKey: ["auth-files"], queryFn: () => credentials.list(), refetchInterval: 30_000 });
   const providers = useQuery({ queryKey: ["quota-providers"], queryFn: quota.providers, staleTime: 60_000 });
 
@@ -63,7 +65,9 @@ export function QuotaPage() {
         plugin_id: typeof entry.quota_plugin_id === "string" ? entry.quota_plugin_id : undefined,
         provider: entry.quota_provider,
       });
+      saveCachedQuota([entry.auth_index, entry.id, entry.name], data, entry.success, entry.failed);
       setResults((current) => ({ ...current, [key]: { entry, data } }));
+      void queryClient.invalidateQueries({ queryKey: ["auth-files"] });
     } catch (error) {
       setResults((current) => ({ ...current, [key]: { entry, error: errMessage(error) } }));
     } finally {
@@ -86,6 +90,7 @@ export function QuotaPage() {
         }
       });
       await Promise.all(workers);
+      void queryClient.invalidateQueries({ queryKey: ["auth-files"] });
       toast.success(t("common.saved", "全部配额查询完成"));
     } finally {
       setBatchLoading(false);
@@ -123,7 +128,8 @@ export function QuotaPage() {
           </p>
           {quotaEntries.map((entry) => {
             const key = String(entry.auth_index || entry.id);
-            const result = results[key];
+            const cached = getCachedQuota(entry);
+            const result = results[key] ?? (cached?.data !== undefined ? { entry, data: cached.data } : undefined);
             const isLoading = loading[key];
             return (
               <SectionCard

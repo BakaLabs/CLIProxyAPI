@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
@@ -64,5 +65,46 @@ func TestQuotaObservationPayloadExcludesCooldownState(t *testing.T) {
 	}
 	if _, ok := payload["backoff_level"]; ok {
 		t.Fatalf("cooldown backoff leaked: %#v", payload)
+	}
+}
+
+func TestBuildAuthFileEntry_ManualQuotaSnapshot(t *testing.T) {
+	h := NewHandler(nil, "", nil)
+	auth := &coreauth.Auth{
+		ID:       "auth-test-1",
+		Provider: "codex",
+		FileName: "test.json",
+		Success:  10,
+		Failed:   2,
+		Attributes: map[string]string{
+			"path": "/tmp/test.json",
+		},
+	}
+	auth.EnsureIndex()
+
+	// Before recording manual quota, manual_quota must be nil
+	entryBefore := h.buildAuthFileEntryLocked(auth, authFileQuotaContext{})
+	if _, ok := entryBefore["manual_quota"]; ok {
+		t.Fatalf("expected manual_quota to be omitted before fetch, got: %#v", entryBefore["manual_quota"])
+	}
+
+	// Record manual quota
+	quotaData := map[string]any{"plan": "pro", "remaining_percent": 80.0}
+	h.recordManualQuota(auth, quotaData)
+
+	entryAfter := h.buildAuthFileEntryLocked(auth, authFileQuotaContext{})
+	rawMq, ok := entryAfter["manual_quota"]
+	if !ok || rawMq == nil {
+		t.Fatalf("expected manual_quota to be present after record, got nil")
+	}
+	mq, okMq := rawMq.(gin.H)
+	if !okMq {
+		t.Fatalf("manual_quota is not gin.H: %#v", rawMq)
+	}
+	if mq["base_success"] != int64(10) || mq["base_failed"] != int64(2) {
+		t.Fatalf("unexpected base counters: success=%v, failed=%v", mq["base_success"], mq["base_failed"])
+	}
+	if mq["data"] == nil {
+		t.Fatalf("manual_quota data is nil")
 	}
 }

@@ -206,6 +206,12 @@ export interface AuthFileEntry {
   failed?: number;
   recent_requests?: { time: number; success: number; failed: number }[];
   quota?: unknown;
+  manual_quota?: {
+    data: unknown;
+    fetched_at: string;
+    base_success: number;
+    base_failed: number;
+  };
   model_quotas?: Record<string, unknown>;
   supports_quota?: boolean;
   quota_provider?: string;

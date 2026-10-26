@@ -198,6 +198,11 @@ func TestFetchCredentialQuota_Endpoint(t *testing.T) {
 	if quotaResp.Groups[0].Buckets[0].RemainingFraction != 0.9 {
 		t.Fatalf("unexpected fraction: %f", quotaResp.Groups[0].Buckets[0].RemainingFraction)
 	}
+
+	mq := h.getManualQuota(auth)
+	if mq == nil {
+		t.Fatalf("expected manual quota to be recorded in handler after fetch")
+	}
 }
 
 func TestResetCredentialQuota_Endpoint(t *testing.T) {

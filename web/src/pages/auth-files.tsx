@@ -52,36 +52,19 @@ import { DetailList, JsonView, SectionCard } from "@/components/shared/misc";
 import { credentials, quota } from "@/api/management";
 import { errMessage, type AuthFileEntry } from "@/api/types";
 import { dayjs, formatBytes, formatInt, fromNow } from "@/lib/format";
-
-const LOCAL_STORAGE_QUOTA_KEY = "cpa-credential-quotas";
-
-export interface ResolvedQuota {
-  plan: string;
-  windowLabel: string;
-  remainingPct: number;
-  resetTime?: string;
-  isUpstream: boolean;
-  activeResets: string | number;
-}
+import {
+  getCachedQuota,
+  saveCachedQuota,
+  syncCachedQuotasFromEntries,
+  resolveCredentialQuota,
+  type ResolvedQuota,
+} from "@/lib/quota-store";
 
 function formatModTime(raw: string | number | undefined | null): string {
   if (!raw) return "—";
   const d = typeof raw === "number" ? (raw < 1e11 ? dayjs.unix(raw) : dayjs(raw)) : dayjs(raw);
   if (!d.isValid()) return String(raw);
   return d.format("YYYY/MM/DD HH:mm:ss");
-}
-
-function formatQuotaResetTime(raw: string | number | undefined | null): string {
-  if (!raw) return "";
-  const d = typeof raw === "number" ? (raw < 1e11 ? dayjs.unix(raw) : dayjs(raw)) : dayjs(raw);
-  if (!d.isValid()) return String(raw);
-  return d.format("MM/DD HH:mm");
-}
-
-function capitalize(s?: string): string {
-  if (!s) return "Free";
-  const lower = s.toLowerCase();
-  return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
 function getProviderTheme(provider?: string) {
@@ -129,189 +112,6 @@ function formatProviderLabel(provider?: string): string {
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
-interface RawQuotaBucket {
-  window?: string;
-  remainingFraction?: number;
-  remaining_fraction?: number;
-  resetTime?: string;
-  reset_time?: string;
-  description?: string;
-}
-
-interface RawQuotaGroup {
-  buckets?: RawQuotaBucket[];
-}
-
-interface RawQuotaPayload {
-  subscription?: { plan?: string; title?: string };
-  plan?: string;
-  groups?: RawQuotaGroup[];
-  buckets?: RawQuotaBucket[];
-  remaining_percent?: number;
-  remainingFraction?: number;
-  reset_time?: string;
-  reset_at?: string;
-  active_resets?: string | number;
-}
-
-/**
- * Resolves credential quota:
- * 1. If manualQuota exists (user manually clicked "获取额度"), use upstream authoritative data.
- * 2. Otherwise, estimate from passive signals in entry.quota or calculate from requests & plan baseline ("按请求推算").
- * STRICT: Never automatically issues upstream network calls!
- */
-export function resolveCredentialQuota(entry: AuthFileEntry, manualQuota?: unknown): ResolvedQuota {
-  const activeResets = entry.active_resets !== undefined && entry.active_resets !== null ? entry.active_resets : "未记录";
-
-  // 1. Upstream authoritative (manual user fetch)
-  if (manualQuota && typeof manualQuota === "object") {
-    const raw = manualQuota as RawQuotaPayload;
-    const sub = raw.subscription || {};
-    const plan = capitalize(sub.plan || sub.title || raw.plan || entry.plan_type || entry.account_type || "Free");
-
-    let targetBucket: RawQuotaBucket | null = null;
-    if (Array.isArray(raw.groups)) {
-      for (const grp of raw.groups) {
-        if (Array.isArray(grp.buckets)) {
-          for (const b of grp.buckets) {
-            if (!targetBucket || (b.remainingFraction !== undefined && b.remainingFraction < (targetBucket.remainingFraction ?? 1))) {
-              targetBucket = b;
-            }
-          }
-        }
-      }
-    }
-    if (!targetBucket && Array.isArray(raw.buckets) && raw.buckets.length > 0) {
-      targetBucket = raw.buckets[0] ?? null;
-    }
-
-    if (targetBucket) {
-      const frac = targetBucket.remainingFraction ?? targetBucket.remaining_fraction ?? 1;
-      const remainingPct = Math.max(0, Math.min(100, frac <= 1 ? Math.round(frac * 100) : Math.round(frac)));
-      const rawWindow = String(targetBucket.window || targetBucket.description || "");
-      let windowLabel = "月限额";
-      if (rawWindow.toLowerCase().includes("5h") || rawWindow.toLowerCase().includes("300")) windowLabel = "5小时限额";
-      else if (rawWindow.toLowerCase().includes("week") || rawWindow.toLowerCase().includes("7d")) windowLabel = "周限额";
-      else if (rawWindow.toLowerCase().includes("day") || rawWindow.toLowerCase().includes("24h")) windowLabel = "日限额";
-      else if (rawWindow) windowLabel = rawWindow;
-
-      const resetTime = formatQuotaResetTime(targetBucket.resetTime || targetBucket.reset_time || raw.reset_time);
-      return {
-        plan,
-        windowLabel,
-        remainingPct,
-        resetTime,
-        isUpstream: true,
-        activeResets: raw.active_resets !== undefined ? raw.active_resets : activeResets,
-      };
-    }
-
-    // Generic quota structure
-    if (raw.remaining_percent !== undefined || raw.remainingFraction !== undefined) {
-      const val = Number(raw.remaining_percent ?? raw.remainingFraction);
-      const remainingPct = Math.max(0, Math.min(100, val <= 1 ? Math.round(val * 100) : Math.round(val)));
-      return {
-        plan,
-        windowLabel: "月限额",
-        remainingPct,
-        resetTime: formatQuotaResetTime(raw.reset_time || raw.reset_at),
-        isUpstream: true,
-        activeResets,
-      };
-    }
-  }
-
-  // 2. Passive Signals (from request headers observed in previous requests)
-  const quotaObj = entry.quota as { signals?: Record<string, string>; observed_at?: string } | undefined;
-  const signals = quotaObj?.signals;
-
-  if (signals) {
-    // Codex passive signals
-    const codexUsed = signals["x-codex-primary-used-percent"] || signals["X-Codex-Primary-Used-Percent"];
-    const codexReset = signals["x-codex-primary-reset-at"] || signals["X-Codex-Primary-Reset-At"];
-    const codexWindow = signals["x-codex-primary-window-minutes"] || signals["X-Codex-Primary-Window-Minutes"];
-    const codexPlan = signals["x-codex-plan-type"] || signals["X-Codex-Plan-Type"] || entry.plan_type || entry.account_type;
-
-    if (codexUsed !== undefined && codexUsed !== "") {
-      const used = parseFloat(codexUsed);
-      const remainingPct = Math.max(0, Math.min(100, Math.round(100 - used)));
-      const winMin = Number(codexWindow);
-      let windowLabel = "月限额";
-      if (winMin > 0 && winMin <= 360) windowLabel = "5小时限额";
-      else if (winMin >= 5000 && winMin < 20000) windowLabel = "周限额";
-      else if (winMin >= 20000) windowLabel = "月限额";
-
-      return {
-        plan: capitalize(codexPlan || "Free"),
-        windowLabel,
-        remainingPct,
-        resetTime: formatQuotaResetTime(codexReset),
-        isUpstream: false,
-        activeResets,
-      };
-    }
-
-    // Devin passive signals
-    const devinDaily = signals["daily_quota_remaining_percent"];
-    const devinWeekly = signals["weekly_quota_remaining_percent"];
-    const devinReset = signals["daily_quota_reset_at"] || signals["weekly_quota_reset_at"];
-    if (devinDaily || devinWeekly) {
-      const pctStr = devinDaily || devinWeekly || "100%";
-      const remainingPct = Math.max(0, Math.min(100, Math.round(parseFloat(pctStr.replace("%", "")))));
-      return {
-        plan: capitalize(signals["plan"] || entry.plan_type || "Free"),
-        windowLabel: devinDaily ? "日限额" : "周限额",
-        remainingPct,
-        resetTime: formatQuotaResetTime(devinReset),
-        isUpstream: false,
-        activeResets,
-      };
-    }
-  }
-
-  // 3. Fallback: Request Estimation ("按请求推算")
-  const plan = capitalize(
-    entry.plan_type ||
-      (entry.id_token as { plan_type?: string } | undefined)?.plan_type ||
-      entry.account_type ||
-      (entry.name.toLowerCase().includes("plus") ? "Plus" : "Free")
-  );
-  let baseline = 50;
-  if (plan === "Plus") baseline = 200;
-  else if (plan === "Pro" || plan === "Team") baseline = 500;
-
-  const totalSuccess = entry.success ?? 0;
-  const totalFailed = entry.failed ?? 0;
-  const totalCalls = totalSuccess + totalFailed;
-
-  let remainingPct = 100;
-  if (totalCalls > 0) {
-    const recentCount = Array.isArray(entry.recent_requests) && entry.recent_requests.length > 0
-      ? entry.recent_requests.reduce((sum, b) => sum + (b.success || 0) + (b.failed || 0), 0)
-      : totalCalls;
-    const usedInWindow = (recentCount > 0 ? recentCount : totalCalls) % baseline;
-    remainingPct = Math.max(5, Math.min(100, Math.round(((baseline - usedInWindow) / baseline) * 100)));
-  }
-
-  let resetTime = "";
-  if (entry.next_retry_after) {
-    resetTime = formatQuotaResetTime(entry.next_retry_after);
-  } else {
-    // Generate an estimated rolling cycle reset date
-    const base = entry.last_refresh || entry.modtime || entry.updated_at || entry.created_at;
-    const dt = base ? dayjs(base).add(30, "day") : dayjs().add(24, "day");
-    resetTime = dt.format("MM/DD HH:mm");
-  }
-
-  return {
-    plan,
-    windowLabel: "月限额",
-    remainingPct,
-    resetTime,
-    isUpstream: false,
-    activeResets,
-  };
-}
 
 export function AuthFilesPage() {
   const { t } = useTranslation();
@@ -343,16 +143,24 @@ export function AuthFilesPage() {
   const [batchBusy, setBatchBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  // Manual upstream quotas cache (stored in state + localStorage)
-  const [manualQuotas, setManualQuotas] = useState<Record<string, { fetchedAt: number; data: unknown }>>(() => {
-    try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_QUOTA_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore storage parsing failure
+  // Quota update tick for reactive re-render when quotas are updated
+  const [quotaTick, setQuotaTick] = useState(0);
+
+  useEffect(() => {
+    if (files.data?.files) {
+      syncCachedQuotasFromEntries(files.data.files);
     }
-    return {};
-  });
+  }, [files.data?.files]);
+
+  useEffect(() => {
+    const handleUpdated = () => setQuotaTick((v) => v + 1);
+    window.addEventListener("cpa-quota-updated", handleUpdated);
+    window.addEventListener("storage", handleUpdated);
+    return () => {
+      window.removeEventListener("cpa-quota-updated", handleUpdated);
+      window.removeEventListener("storage", handleUpdated);
+    };
+  }, []);
 
   // Track per-card quota fetching status
   const [fetchingQuotaIds, setFetchingQuotaIds] = useState<Set<string>>(new Set());
@@ -393,15 +201,8 @@ export function AuthFilesPage() {
         plugin_id: typeof entry.quota_plugin_id === "string" ? entry.quota_plugin_id : undefined,
         provider: entry.quota_provider || entry.provider,
       });
-      setManualQuotas((prev) => {
-        const next = { ...prev, [key]: { fetchedAt: Date.now(), data } };
-        try {
-          localStorage.setItem(LOCAL_STORAGE_QUOTA_KEY, JSON.stringify(next));
-        } catch {
-          // ignore localStorage write errors
-        }
-        return next;
-      });
+      saveCachedQuota([entry.auth_index, entry.id, entry.name], data, entry.success, entry.failed);
+      void invalidate();
       toast.success(t("authFiles.quotaFetched"));
     } catch (error) {
       toast.error(`${t("authFiles.quotaFetchFailed")}: ${errMessage(error)}`);
@@ -429,20 +230,13 @@ export function AuthFilesPage() {
           plugin_id: typeof entry.quota_plugin_id === "string" ? entry.quota_plugin_id : undefined,
           provider: entry.quota_provider || entry.provider,
         });
-        setManualQuotas((prev) => {
-          const next = { ...prev, [key]: { fetchedAt: Date.now(), data } };
-          try {
-            localStorage.setItem(LOCAL_STORAGE_QUOTA_KEY, JSON.stringify(next));
-          } catch {
-            // ignore localStorage write errors
-          }
-          return next;
-        });
+        saveCachedQuota([entry.auth_index, entry.id, entry.name], data, entry.success, entry.failed);
         ok++;
       } catch {
         fail++;
       }
     }
+    void invalidate();
     setBatchBusy(false);
     toast.success(`${t("authFiles.quotaFetched")}: ${ok} 成功, ${fail} 失败`);
   };
@@ -547,7 +341,7 @@ export function AuthFilesPage() {
     // Plan filter dropdown
     if (planFilter !== "all") {
       list = list.filter((e) => {
-        const q = resolveCredentialQuota(e, manualQuotas[e.auth_index || e.id || e.name]?.data);
+        const q = resolveCredentialQuota(e, getCachedQuota(e));
         return q.plan.toLowerCase() === planFilter.toLowerCase();
       });
     }
@@ -573,8 +367,7 @@ export function AuthFilesPage() {
       const regex = new RegExp(regexPattern, "i");
 
       list = list.filter((e) => {
-        const key = e.auth_index || e.id || e.name;
-        const q = resolveCredentialQuota(e, manualQuotas[key]?.data);
+        const q = resolveCredentialQuota(e, getCachedQuota(e));
         return (
           regex.test(e.name) ||
           regex.test(e.provider ?? "") ||
@@ -600,9 +393,11 @@ export function AuthFilesPage() {
       sorted.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
     } else if (sortOption === "quota") {
       sorted.sort((a, b) => {
-        const qA = resolveCredentialQuota(a, manualQuotas[a.auth_index || a.id || a.name]?.data).remainingPct;
-        const qB = resolveCredentialQuota(b, manualQuotas[b.auth_index || b.id || b.name]?.data).remainingPct;
-        return qB - qA;
+        const qA = resolveCredentialQuota(a, getCachedQuota(a)).remainingPct;
+        const qB = resolveCredentialQuota(b, getCachedQuota(b)).remainingPct;
+        const valA = qA !== null ? qA : -1;
+        const valB = qB !== null ? qB : -1;
+        return valB - valA;
       });
     } else if (sortOption === "success") {
       sorted.sort((a, b) => (b.success ?? 0) - (a.success ?? 0));
@@ -623,7 +418,7 @@ export function AuthFilesPage() {
     onlyNormal,
     search,
     sortOption,
-    manualQuotas,
+    quotaTick,
   ]);
 
   // Pagination slice
@@ -935,7 +730,7 @@ export function AuthFilesPage() {
         )}>
           {visible.map((entry) => {
             const cardKey = entry.auth_index || entry.id || entry.name;
-            const quotaInfo = resolveCredentialQuota(entry, manualQuotas[cardKey]?.data);
+            const quotaInfo = resolveCredentialQuota(entry, getCachedQuota(entry));
             const isFetchingQuota = fetchingQuotaIds.has(cardKey);
             const isChecked = selectedIds.has(entry.id || entry.name);
 
@@ -1188,12 +983,18 @@ function CredentialCard({
           variant="outline"
           className={cn(
             "text-[10px] px-1.5 py-0 shrink-0 font-medium",
-            quota.isUpstream
+            !quota.isKnown
+              ? "border-dashed border-slate-300 dark:border-slate-700 text-slate-400"
+              : quota.isUpstream
               ? "border-blue-400/60 text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/40"
-              : "border-slate-300/80 dark:border-slate-700 text-slate-500 dark:text-slate-400"
+              : "border-amber-400/60 text-amber-600 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-950/40"
           )}
         >
-          {quota.isUpstream ? t("authFiles.quotaSourceUpstream") : t("authFiles.quotaSourceEstimated")}
+          {!quota.isKnown
+            ? t("authFiles.quotaSourceUnknown")
+            : quota.isUpstream
+            ? t("authFiles.quotaSourceUpstream")
+            : t("authFiles.quotaSourceEstimated")}
         </Badge>
       </div>
 
@@ -1352,6 +1153,43 @@ function HealthTimeline({
  */
 function QuotaBar({ quota }: { quota: ResolvedQuota }) {
   const { t } = useTranslation();
+
+  if (!quota.isKnown || quota.remainingPct === null) {
+    return (
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between text-xs">
+          <div className="flex items-center gap-1 font-medium text-slate-500 dark:text-slate-400">
+            <span>{quota.windowLabel || t("authFiles.quotaSourceUnknown")}</span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Info className="size-3.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer" />
+              </TooltipTrigger>
+              <TooltipContent>
+                <div className="text-xs space-y-1 max-w-56">
+                  <p className="font-semibold text-slate-900 dark:text-slate-100">
+                    {t("authFiles.quotaSourceUnknownFull")}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {t("authFiles.quotaUnknownHint")}
+                  </p>
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+
+          <div className="flex items-center gap-2 font-mono text-xs">
+            <span className="font-medium text-slate-400 dark:text-slate-500">
+              未知
+            </span>
+          </div>
+        </div>
+
+        <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+          <div className="h-full w-0 bg-transparent rounded-full" />
+        </div>
+      </div>
+    );
+  }
 
   const pct = Math.max(0, Math.min(100, quota.remainingPct));
   const isGreen = pct > 60;

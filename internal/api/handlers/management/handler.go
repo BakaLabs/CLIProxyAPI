@@ -63,6 +63,16 @@ type Handler struct {
 	pluginReleases          pluginReleaseCache
 	siwcOAuthFactory        func(*config.Config) siwcOAuthService
 	siwcCommitMu            sync.Mutex
+	manualQuotasMu          sync.RWMutex
+	manualQuotas            map[string]*ManualQuotaSnapshot
+}
+
+// ManualQuotaSnapshot captures the result of a manual upstream quota fetch along with baseline request counters.
+type ManualQuotaSnapshot struct {
+	Data        any       `json:"data"`
+	FetchedAt   time.Time `json:"fetched_at"`
+	BaseSuccess int64     `json:"base_success"`
+	BaseFailed  int64     `json:"base_failed"`
 }
 
 type configReloadSnapshot struct {
@@ -83,6 +93,7 @@ func NewHandler(cfg *config.Config, configFilePath string, manager *coreauth.Man
 		tokenStore:          sdkAuth.GetTokenStore(),
 		allowRemoteOverride: envSecret != "",
 		envSecret:           envSecret,
+		manualQuotas:        make(map[string]*ManualQuotaSnapshot),
 	}
 	h.startAttemptCleanup()
 	return h
@@ -493,4 +504,80 @@ func (h *Handler) updateStringField(c *gin.Context, set func(string)) {
 	defer h.mu.Unlock()
 	set(*body.Value)
 	h.persistLocked(c)
+}
+
+func (h *Handler) recordManualQuota(auth *coreauth.Auth, data any) {
+	if h == nil || auth == nil {
+		return
+	}
+	snapshot := &ManualQuotaSnapshot{
+		Data:        data,
+		FetchedAt:   time.Now().UTC(),
+		BaseSuccess: auth.Success,
+		BaseFailed:  auth.Failed,
+	}
+	h.manualQuotasMu.Lock()
+	if h.manualQuotas == nil {
+		h.manualQuotas = make(map[string]*ManualQuotaSnapshot)
+	}
+	if auth.ID != "" {
+		h.manualQuotas[auth.ID] = snapshot
+	}
+	auth.EnsureIndex()
+	if auth.Index != "" {
+		h.manualQuotas[auth.Index] = snapshot
+	}
+	if auth.FileName != "" {
+		h.manualQuotas[auth.FileName] = snapshot
+	}
+	h.manualQuotasMu.Unlock()
+}
+
+func (h *Handler) getManualQuota(auth *coreauth.Auth) *ManualQuotaSnapshot {
+	if h == nil || auth == nil {
+		return nil
+	}
+	h.manualQuotasMu.RLock()
+	defer h.manualQuotasMu.RUnlock()
+	if h.manualQuotas == nil {
+		return nil
+	}
+	if auth.ID != "" {
+		if s, ok := h.manualQuotas[auth.ID]; ok {
+			return s
+		}
+	}
+	auth.EnsureIndex()
+	if auth.Index != "" {
+		if s, ok := h.manualQuotas[auth.Index]; ok {
+			return s
+		}
+	}
+	if auth.FileName != "" {
+		if s, ok := h.manualQuotas[auth.FileName]; ok {
+			return s
+		}
+	}
+	return nil
+}
+
+func (h *Handler) clearManualQuota(auth *coreauth.Auth) {
+	if h == nil || auth == nil {
+		return
+	}
+	h.manualQuotasMu.Lock()
+	defer h.manualQuotasMu.Unlock()
+	if h.manualQuotas == nil {
+		return
+	}
+	if auth.ID != "" {
+		delete(h.manualQuotas, auth.ID)
+	}
+	auth.EnsureIndex()
+	if auth.Index != "" {
+		delete(h.manualQuotas, auth.Index)
+	}
+	if auth.FileName != "" {
+		delete(h.manualQuotas, auth.FileName)
+	}
 }
