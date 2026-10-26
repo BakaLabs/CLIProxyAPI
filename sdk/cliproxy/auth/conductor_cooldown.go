@@ -2026,7 +2026,11 @@ func isConnectionLifecycleMessage(message string) bool {
 func isHTTP2ClosedConnectionMessage(lower string) bool {
 	// x/net/http2 keeps these errors unexported; allow common wrappers such as url.Error.
 	return strings.Contains(lower, "http2: client connection force closed via clientconn.close") ||
-		strings.Contains(lower, "http2: client conn is closed")
+		strings.Contains(lower, "http2: client conn is closed") ||
+		strings.Contains(lower, "http2: client connection lost") ||
+		strings.Contains(lower, "http2: server sent goaway") ||
+		strings.Contains(lower, "stream error: stream id") ||
+		strings.Contains(lower, "http2: stream error")
 }
 
 // isConfiguredTLSHandshakeTimeoutError identifies the typed internal

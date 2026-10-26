@@ -63,6 +63,9 @@ func TestManager_ShouldRetryAfterError_RetriesPreHTTPTransportFailure(t *testing
 		{name: "unexpected eof", err: io.ErrUnexpectedEOF, want: true},
 		{name: "http2 force closed", err: errors.New("http2: client connection force closed via ClientConn.Close"), want: true},
 		{name: "http2 conn closed", err: &url.Error{Op: "Post", URL: "https://example.com", Err: errors.New("http2: client conn is closed")}, want: true},
+		{name: "http2 stream error protocol", err: errors.New("stream error: stream ID 1; PROTOCOL_ERROR; received from peer"), want: true},
+		{name: "http2 stream error internal", err: &url.Error{Op: "Post", URL: "https://example.com", Err: errors.New("http2: stream error: stream ID 1; INTERNAL_ERROR")}, want: true},
+		{name: "http2 goaway", err: &url.Error{Op: "Post", URL: "https://example.com", Err: errors.New("http2: server sent GOAWAY and closed the connection")}, want: true},
 		{name: "unauthorized", err: &Error{HTTPStatus: http.StatusUnauthorized, Message: "unauthorized"}, want: false},
 		{name: "canceled", err: context.Canceled, want: false},
 		{name: "certificate", err: &url.Error{Op: "Post", URL: "https://chatgpt.com/backend-api/codex/responses", Err: x509.UnknownAuthorityError{}}, want: false},
@@ -280,6 +283,8 @@ func TestManager_HTTP2ClosedConnectionRespectsRequestRetry(t *testing.T) {
 	for _, message := range []string{
 		"http2: client connection force closed via ClientConn.Close",
 		"http2: client conn is closed",
+		"stream error: stream ID 1; PROTOCOL_ERROR; received from peer",
+		"http2: server sent GOAWAY and closed the connection",
 	} {
 		for _, kind := range []string{"execute", "stream", "count"} {
 			for _, retries := range []int{0, 1} {

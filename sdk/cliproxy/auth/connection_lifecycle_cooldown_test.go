@@ -36,6 +36,8 @@ func TestManager_MarkResult_ConnectionLifecycleDoesNotCooldown(t *testing.T) {
 		{name: "wrapped unexpected EOF", err: &Error{Message: "read tcp 127.0.0.1:1->127.0.0.1:2: unexpected EOF"}},
 		{name: "http2 force closed", err: &Error{Message: "http2: client connection force closed via ClientConn.Close"}},
 		{name: "http2 conn closed", err: &Error{Message: "http2: client conn is closed"}},
+		{name: "http2 stream error protocol", err: &Error{Message: "stream error: stream ID 1; PROTOCOL_ERROR; received from peer"}},
+		{name: "http2 goaway", err: &Error{Message: "http2: server sent GOAWAY and closed the connection"}},
 		{name: "typed canceled", err: resultErrorFromError(context.Canceled)},
 		{name: "typed deadline", err: resultErrorFromError(context.DeadlineExceeded)},
 		{name: "url canceled", err: resultErrorFromError(&url.Error{Op: "Post", URL: "https://example.com", Err: context.Canceled})},
@@ -114,6 +116,8 @@ func TestManager_MarkResult_HTTP2ClosedConnectionKeepsPoolAvailable(t *testing.T
 	}{
 		{name: "force closed", message: "http2: client connection force closed via ClientConn.Close"},
 		{name: "conn closed", message: "http2: client conn is closed"},
+		{name: "stream error", message: "stream error: stream ID 1; PROTOCOL_ERROR; received from peer"},
+		{name: "goaway", message: "http2: server sent GOAWAY and closed the connection"},
 		{name: "EOF control", message: "unexpected EOF"},
 	}
 	for _, tc := range cases {
