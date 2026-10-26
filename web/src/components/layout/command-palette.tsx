@@ -65,23 +65,38 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         <CommandEmpty>{t("common.empty")}</CommandEmpty>
 
         <CommandGroup heading={t("nav.observability")}>
-          <CommandItem onSelect={() => runCommand(() => navigate("/"))}>
+          <CommandItem
+            keywords={["dashboard", "home", "监控仪表盘", "大盘", "概览", "/"]}
+            onSelect={() => runCommand(() => navigate("/"))}
+          >
             <LayoutDashboard className="mr-2 size-4" />
             <span>{t("nav.dashboard")}</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => navigate("/playground"))}>
+          <CommandItem
+            keywords={["playground", "chat", "debug", "test", "接口调试", "调试", "/playground"]}
+            onSelect={() => runCommand(() => navigate("/playground"))}
+          >
             <Terminal className="mr-2 size-4 text-blue-500" />
             <span>{t("playground.title") || "接口调试"}</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => navigate("/request-logs"))}>
+          <CommandItem
+            keywords={["request-logs", "requests", "access", "请求日志", "调用记录", "/request-logs"]}
+            onSelect={() => runCommand(() => navigate("/request-logs"))}
+          >
             <Activity className="mr-2 size-4" />
             <span>{t("nav.requestLogs")}</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => navigate("/request-db"))}>
+          <CommandItem
+            keywords={["request-db", "database", "sqlite", "storage", "日志存储管理", "请求数据库", "/request-db"]}
+            onSelect={() => runCommand(() => navigate("/request-db"))}
+          >
             <Database className="mr-2 size-4" />
             <span>{t("nav.requestDb")}</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => navigate("/logs"))}>
+          <CommandItem
+            keywords={["logs", "file", "system-logs", "运行日志", "日志", "/logs"]}
+            onSelect={() => runCommand(() => navigate("/logs"))}
+          >
             <ScrollText className="mr-2 size-4" />
             <span>{t("nav.logs")}</span>
           </CommandItem>
@@ -90,19 +105,31 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         <CommandSeparator />
 
         <CommandGroup heading={t("nav.providers")}>
-          <CommandItem onSelect={() => runCommand(() => navigate("/providers"))}>
+          <CommandItem
+            keywords={["providers", "models", "upstream", "供应商管理", "模型", "/providers"]}
+            onSelect={() => runCommand(() => navigate("/providers"))}
+          >
             <BarChart3 className="mr-2 size-4" />
             <span>{t("nav.providersItem")}</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => navigate("/auth-files"))}>
+          <CommandItem
+            keywords={["auth-files", "auth", "credentials", "keys", "tokens", "凭据文件", "凭据", "/auth-files"]}
+            onSelect={() => runCommand(() => navigate("/auth-files"))}
+          >
             <KeyRound className="mr-2 size-4" />
             <span>{t("nav.authFiles")}</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => navigate("/oauth"))}>
+          <CommandItem
+            keywords={["oauth", "authorize", "login", "OAuth 授权", "授权", "/oauth"]}
+            onSelect={() => runCommand(() => navigate("/oauth"))}
+          >
             <UserCheck className="mr-2 size-4" />
             <span>{t("nav.oauth")}</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => navigate("/quota"))}>
+          <CommandItem
+            keywords={["quota", "balance", "usage", "limits", "配额调度", "配额", "/quota"]}
+            onSelect={() => runCommand(() => navigate("/quota"))}
+          >
             <Coins className="mr-2 size-4" />
             <span>{t("nav.quota")}</span>
           </CommandItem>
@@ -111,19 +138,31 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         <CommandSeparator />
 
         <CommandGroup heading={t("nav.management")}>
-          <CommandItem onSelect={() => runCommand(() => navigate("/config"))}>
+          <CommandItem
+            keywords={["config", "settings", "系统配置", "配置", "/config"]}
+            onSelect={() => runCommand(() => navigate("/config"))}
+          >
             <Settings2 className="mr-2 size-4" />
             <span>{t("nav.config")}</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => navigate("/config?tab=yaml"))}>
+          <CommandItem
+            keywords={["yaml", "raw-config", "editor", "YAML 配置编辑", "配置编辑", "/config?tab=yaml"]}
+            onSelect={() => runCommand(() => navigate("/config?tab=yaml"))}
+          >
             <FileCode2 className="mr-2 size-4" />
             <span>YAML 配置编辑</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => navigate("/plugins"))}>
+          <CommandItem
+            keywords={["plugins", "extensions", "store", "插件扩展", "插件", "/plugins"]}
+            onSelect={() => runCommand(() => navigate("/plugins"))}
+          >
             <Blocks className="mr-2 size-4" />
             <span>{t("nav.plugins")}</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => navigate("/system"))}>
+          <CommandItem
+            keywords={["system", "health", "status", "info", "系统信息", "系统", "/system"]}
+            onSelect={() => runCommand(() => navigate("/system"))}
+          >
             <ShieldCheck className="mr-2 size-4" />
             <span>{t("nav.systemItem")}</span>
           </CommandItem>
@@ -132,11 +171,17 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         <CommandSeparator />
 
         <CommandGroup heading={t("common.actions")}>
-          <CommandItem onSelect={() => runCommand(() => setTheme(theme === "dark" ? "light" : "dark"))}>
+          <CommandItem
+            keywords={["theme", "dark", "light", "mode", "主题", "暗色", "浅色", "夜间模式"]}
+            onSelect={() => runCommand(() => setTheme(theme === "dark" ? "light" : "dark"))}
+          >
             {theme === "dark" ? <Sun className="mr-2 size-4" /> : <Moon className="mr-2 size-4" />}
             <span>切换暗色 / 浅色模式</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(clearAuth)}>
+          <CommandItem
+            keywords={["logout", "exit", "sign out", "退出登录", "退出"]}
+            onSelect={() => runCommand(clearAuth)}
+          >
             <LogOut className="mr-2 size-4 text-destructive" />
             <span>{t("nav.logout")}</span>
           </CommandItem>
