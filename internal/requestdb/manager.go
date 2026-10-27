@@ -27,7 +27,7 @@ const (
 	writeFlushInterval  = 100 * time.Millisecond
 	retentionSweepEvery = time.Hour
 	// defaultRetentionDays / defaultErrorBodyMaxBytes mirror the config defaults.
-	defaultRetentionDays     = 30
+	defaultRetentionDays     = 0
 	defaultErrorBodyMaxBytes = 8192
 )
 

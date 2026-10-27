@@ -1166,8 +1166,8 @@ observability:
     # relative paths resolve against the auth dir.
     path: ""
 
-    # Delete stored entries older than this many days. 0 keeps entries forever.
-    retention-days: 30
+    # Delete stored entries older than this many days. 0 keeps entries forever (default: 0).
+    retention-days: 0
 
     # When > 0, also store the first N bytes of the decoded request body and of
     # the response stream per request (zstd-compressed). 0 (default) stores no

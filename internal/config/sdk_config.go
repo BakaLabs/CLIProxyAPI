@@ -95,7 +95,7 @@ type SDKConfig struct {
 	RequestDBPath string `yaml:"request-db-path" json:"request-db-path"`
 
 	// RequestDBRetentionDays deletes stored entries older than this many days.
-	// 0 keeps entries forever; negative values fall back to the default (30).
+	// 0 keeps entries forever (default: 0); negative values fall back to 0.
 	RequestDBRetentionDays int `yaml:"request-db-retention-days" json:"request-db-retention-days"`
 
 	// RequestDBPreviewBytes stores the first N bytes of the decoded request

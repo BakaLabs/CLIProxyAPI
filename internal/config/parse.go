@@ -30,7 +30,7 @@ func ParseConfigBytes(data []byte) (*Config, error) {
 	cfg.RedisUsageQueueRetentionSeconds = 60
 	cfg.RequestDBEnabled = true
 	cfg.RequestDBPath = ""
-	cfg.RequestDBRetentionDays = 30
+	cfg.RequestDBRetentionDays = 0
 	cfg.RequestDBPreviewBytes = 0
 	cfg.RequestDBErrorBodyMaxBytes = 8192
 	cfg.DisableCooling = false
@@ -106,7 +106,7 @@ func ParseConfigBytes(data []byte) (*Config, error) {
 	}
 
 	if cfg.RequestDBRetentionDays < 0 {
-		cfg.RequestDBRetentionDays = 30
+		cfg.RequestDBRetentionDays = 0
 	}
 	if cfg.RequestDBPreviewBytes < 0 {
 		cfg.RequestDBPreviewBytes = 0

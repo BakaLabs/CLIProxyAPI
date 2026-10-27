@@ -14,7 +14,7 @@ func testOptions(dir string, modify func(*Options)) Options {
 	opts := Options{
 		Enabled:           true,
 		Path:              filepath.Join(dir, "requestlog.db"),
-		RetentionDays:     30,
+		RetentionDays:     0,
 		PreviewBytes:      0,
 		ErrorBodyMaxBytes: 8192,
 	}
