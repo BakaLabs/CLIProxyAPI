@@ -5,7 +5,7 @@
 > curl -fsSL https://raw.githubusercontent.com/juzi5201314/CLIProxyAPI/main/install.sh | bash
 > ```
 
-本项目为 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 的功能增强与深度优化 Fork 版本（版本号标记为 `*-s*`，当前版本：`v8.0.43-s3`），专注于模型协议保真度、可观测性数据分析、存储治理以及更现代流畅的开箱即用体验。
+本项目为 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 的功能增强与深度优化 Fork 版本（版本号标记为 `*-s*`，当前版本：`v8.0.43-s4`），专注于模型协议保真度、可观测性数据分析、存储治理以及更现代流畅的开箱即用体验。
 
 ---
 
@@ -21,6 +21,7 @@
 - **细粒度指标持久化**：每笔请求持久化记录 Token 明细（Prompt / Completion / Thinking / Cache 命中率）、模型调用链（请求别名 → 实际上游模型 → 响应模型）、服务层级、延迟、TTFT、HTTP 状态码及 TraceID。
 - **提示词总 Tokens 准确计量**：严格规范全协议提示词 Token 统计（Total Input = Uncached + Cache Read + Cache Creation），杜绝带缓存请求在外部统计为 0 输入的偏差，自动兼容平滑迁移历史表结构。
 - **zstd 高压缩 BLOB**：请求/响应头、错误正文与报文预览均经 zstd 二进制压缩入库，节省超过 70% 存储。
+- **默认永久保存与可调轮转**：日志默认永久保留不自动过期，支持按天自定义保留周期（`retention-days`）或在控制台按时间/数据量随时手动清理。
 - **与传统文件日志相互解耦**：与系统原有的 `request-log` 文本文件日志完全独立，支持高并发轻量记录。
 
 ### 3. 深度可观测性监控大屏与实时日志流

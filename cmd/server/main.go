@@ -43,7 +43,7 @@ import (
 )
 
 var (
-	Version           = "8.0.43-s3"
+	Version           = "8.0.43-s4"
 	Commit            = "none"
 	BuildDate         = "unknown"
 	DefaultConfigPath = ""
