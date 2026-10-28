@@ -194,6 +194,10 @@ export const credentials = {
     const { data } = await client.get("/credentials/models", { params: { name } });
     return (data as { models: ModelInfo[] }).models;
   },
+  async syncModels(body: { name?: string; auth_index?: string }): Promise<{ ok: boolean; models: ModelInfo[]; count?: number; cached?: boolean; synced_at?: string; synced_peers?: number }> {
+    const { data } = await client.post("/credentials/models/sync", body);
+    return data as { ok: boolean; models: ModelInfo[]; count?: number; cached?: boolean; synced_at?: string; synced_peers?: number };
+  },
   async upload(files: File[]): Promise<{ status?: string; uploaded?: number; failed?: { name: string; error: string }[] }> {
     const form = new FormData();
     for (const file of files) form.append("files", file);
@@ -418,5 +422,18 @@ export const providerLists = {
   /** Map-shaped endpoints (oauth-excluded-models, oauth-model-alias) take the bare object. */
   async putMap(path: string, map: unknown): Promise<void> {
     await client.put(`/${path}`, map, v0());
+  },
+};
+
+// ------------------------------------------------------------- modelDefinitions
+
+export const modelDefinitions = {
+  async getByChannel(channel: string): Promise<ModelInfo[]> {
+    try {
+      const { data } = await client.get(`/routing/model-definitions/${encodeURIComponent(channel)}`);
+      return (data as { models: ModelInfo[] }).models ?? [];
+    } catch {
+      return [];
+    }
   },
 };

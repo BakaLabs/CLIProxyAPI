@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Eye, EyeOff, Plus, Trash2, X } from "lucide-react";
+import { Check, ChevronsUpDown, Eye, EyeOff, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +12,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -19,11 +24,222 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { providerLists } from "@/api/management";
+import { modelDefinitions, providerLists } from "@/api/management";
 import { errMessage } from "@/api/types";
 
 /** OAuth channels that can carry alias / exclusion rules. */
 const OAUTH_CHANNELS = ["gemini", "gemini-interactions", "claude", "codex", "antigravity", "vertex", "aistudio", "kimi", "xai", "devin", "meta"];
+
+/** Hook to fetch available models for the given channels. */
+function useChannelModels(channels: string[]) {
+  const [channelModels, setChannelModels] = useState<Record<string, string[]>>({});
+  const [loading, setLoading] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    for (const channel of channels) {
+      if (channelModels[channel] !== undefined || loading[channel]) continue;
+      setLoading((prev) => ({ ...prev, [channel]: true }));
+      modelDefinitions
+        .getByChannel(channel)
+        .then((list) => {
+          setChannelModels((prev) => ({
+            ...prev,
+            [channel]: list.map((m) => m.id).filter(Boolean),
+          }));
+        })
+        .catch(() => {
+          setChannelModels((prev) => ({ ...prev, [channel]: [] }));
+        })
+        .finally(() => {
+          setLoading((prev) => ({ ...prev, [channel]: false }));
+        });
+    }
+  }, [channels, channelModels, loading]);
+
+  return { channelModels, loading };
+}
+
+/** Combobox input allowing direct selection from available channel models or typing custom model names. */
+function ModelCombobox({
+  value,
+  onChange,
+  options,
+  placeholder,
+  className,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  placeholder?: string;
+  className?: string;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const filtered = useMemo(() => {
+    const q = value.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((opt) => opt.toLowerCase().includes(q));
+  }, [options, value]);
+
+  return (
+    <Popover open={open && options.length > 0} onOpenChange={setOpen}>
+      <PopoverAnchor asChild>
+        <div className="relative min-w-0 flex-1">
+          <Input
+            className={className}
+            value={value}
+            placeholder={placeholder}
+            onChange={(event) => {
+              onChange(event.target.value);
+              setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            onClick={() => setOpen(true)}
+          />
+          {options.length > 0 && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen((prev) => !prev);
+              }}
+              tabIndex={-1}
+            >
+              <ChevronsUpDown className="size-3 opacity-60" />
+            </button>
+          )}
+        </div>
+      </PopoverAnchor>
+      <PopoverContent
+        className="w-72 p-1.5 rounded-xl shadow-lg"
+        align="start"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
+        <div className="max-h-48 overflow-y-auto space-y-0.5">
+          {filtered.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground text-center py-2">
+              {t("providers.noMatchingModels")}
+            </p>
+          ) : (
+            filtered.map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-left font-mono text-xs hover:bg-muted transition-colors cursor-pointer ${
+                  opt === value ? "bg-muted font-bold text-primary" : "text-foreground"
+                }`}
+                onClick={() => {
+                  onChange(opt);
+                  setOpen(false);
+                }}
+              >
+                <span className="truncate">{opt}</span>
+                {opt === value && <Check className="size-3 text-primary shrink-0 ml-1" />}
+              </button>
+            ))
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** Input allowing selection from available channel models or typing wildcards/custom patterns. */
+function ExcludedModelPicker({
+  options,
+  existingPatterns,
+  onAdd,
+  placeholder,
+}: {
+  options: string[];
+  existingPatterns: string[];
+  onAdd: (pattern: string) => void;
+  placeholder?: string;
+}) {
+  const { t } = useTranslation();
+  const [value, setValue] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const candidates = useMemo(() => {
+    return options.filter((opt) => !existingPatterns.includes(opt));
+  }, [options, existingPatterns]);
+
+  const filtered = useMemo(() => {
+    const q = value.trim().toLowerCase();
+    if (!q) return candidates;
+    return candidates.filter((opt) => opt.toLowerCase().includes(q));
+  }, [candidates, value]);
+
+  const handleCommit = (val: string) => {
+    const trimmed = val.trim();
+    if (!trimmed) return;
+    onAdd(trimmed);
+    setValue("");
+    setOpen(false);
+  };
+
+  return (
+    <Popover open={open && options.length > 0} onOpenChange={setOpen}>
+      <PopoverAnchor asChild>
+        <div className="relative inline-flex items-center">
+          <Input
+            className="h-7 w-56 font-mono text-xs pr-6"
+            value={value}
+            placeholder={placeholder}
+            onChange={(event) => {
+              setValue(event.target.value);
+              setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            onClick={() => setOpen(true)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                handleCommit(value);
+              }
+            }}
+          />
+          {options.length > 0 && (
+            <button
+              type="button"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+              onClick={() => setOpen((prev) => !prev)}
+              tabIndex={-1}
+            >
+              <ChevronsUpDown className="size-3 opacity-60" />
+            </button>
+          )}
+        </div>
+      </PopoverAnchor>
+      <PopoverContent
+        className="w-72 p-1.5 rounded-xl shadow-lg"
+        align="start"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
+        <div className="max-h-48 overflow-y-auto space-y-0.5">
+          {filtered.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground text-center py-2">
+              {t("providers.pressEnterToAdd", { value })}
+            </p>
+          ) : (
+            filtered.map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-left font-mono text-xs hover:bg-muted transition-colors cursor-pointer group"
+                onClick={() => handleCommit(opt)}
+              >
+                <span className="truncate text-foreground group-hover:text-primary">{opt}</span>
+                <Plus className="size-3 text-muted-foreground group-hover:text-primary shrink-0 ml-1" />
+              </button>
+            ))
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 // ------------------------------------------------------------ model alias
 
@@ -60,6 +276,7 @@ export function ModelAliasDialog({ onClose }: { onClose: () => void }) {
 
   const channels = draft ? Object.keys(draft) : [];
   const addable = OAUTH_CHANNELS.filter((channel) => !channels.includes(channel));
+  const { channelModels } = useChannelModels(channels);
 
   const save = async () => {
     if (!draft) return;
@@ -93,7 +310,14 @@ export function ModelAliasDialog({ onClose }: { onClose: () => void }) {
                 return (
                   <div key={channel} className="card-surface p-3">
                     <div className="mb-2.5 flex items-center justify-between">
-                      <p className="font-mono text-xs font-semibold">{channel}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-mono text-xs font-semibold">{channel}</p>
+                        {channelModels[channel]?.length ? (
+                          <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                            {t("providers.availableModelsCount", { count: channelModels[channel].length })}
+                          </span>
+                        ) : null}
+                      </div>
                       <div className="flex items-center gap-1">
                         <Button
                           variant="outline"
@@ -125,23 +349,25 @@ export function ModelAliasDialog({ onClose }: { onClose: () => void }) {
                       <div className="space-y-1.5">
                         {rows.map((row, index) => (
                           <div key={index} className="flex items-center gap-2">
-                            <Input
+                            <ModelCombobox
                               className="h-8 min-w-0 flex-1 font-mono text-xs"
                               value={row.name}
+                              options={channelModels[channel] ?? []}
                               placeholder={t("providers.aliasSourceName")}
-                              onChange={(event) => {
+                              onChange={(val) => {
                                 const next = [...rows];
-                                next[index] = { ...row, name: event.target.value };
+                                next[index] = { ...row, name: val };
                                 setChannel(next);
                               }}
                             />
-                            <Input
+                            <ModelCombobox
                               className="h-8 min-w-0 flex-1 font-mono text-xs"
                               value={row.alias}
+                              options={channelModels[channel] ?? []}
                               placeholder={t("providers.aliasTargetName")}
-                              onChange={(event) => {
+                              onChange={(val) => {
                                 const next = [...rows];
-                                next[index] = { ...row, alias: event.target.value };
+                                next[index] = { ...row, alias: val };
                                 setChannel(next);
                               }}
                             />
@@ -225,7 +451,6 @@ export function ExcludedModelsDialog({ onClose }: { onClose: () => void }) {
   const [draft, setDraft] = useState<Record<string, string[]> | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [pending, setPending] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -260,6 +485,7 @@ export function ExcludedModelsDialog({ onClose }: { onClose: () => void }) {
 
   const channels = draft ? Object.keys(draft) : [];
   const addable = OAUTH_CHANNELS.filter((channel) => !channels.includes(channel));
+  const { channelModels } = useChannelModels(channels);
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -278,7 +504,14 @@ export function ExcludedModelsDialog({ onClose }: { onClose: () => void }) {
                 return (
                   <div key={channel} className="card-surface p-3">
                     <div className="mb-2.5 flex items-center justify-between">
-                      <p className="font-mono text-xs font-semibold">{channel}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-mono text-xs font-semibold">{channel}</p>
+                        {channelModels[channel]?.length ? (
+                          <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                            {t("providers.availableModelsCount", { count: channelModels[channel].length })}
+                          </span>
+                        ) : null}
+                      </div>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -306,17 +539,12 @@ export function ExcludedModelsDialog({ onClose }: { onClose: () => void }) {
                           </button>
                         </span>
                       ))}
-                      <Input
-                        className="h-7 w-48 font-mono text-xs"
-                        value={pending[channel] ?? ""}
-                        placeholder={t("providers.patternPlaceholder")}
-                        onChange={(event) => setPending({ ...pending, [channel]: event.target.value })}
-                        onKeyDown={(event) => {
-                          if (event.key !== "Enter") return;
-                          const value = (pending[channel] ?? "").trim();
-                          if (!value) return;
-                          setDraft({ ...draft, [channel]: [...patterns, value] });
-                          setPending({ ...pending, [channel]: "" });
+                      <ExcludedModelPicker
+                        options={channelModels[channel] ?? []}
+                        existingPatterns={patterns}
+                        placeholder={t("providers.addExcludedModelOrPattern")}
+                        onAdd={(pattern) => {
+                          setDraft({ ...draft, [channel]: [...patterns, pattern] });
                         }}
                       />
                     </div>

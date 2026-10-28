@@ -26,6 +26,34 @@ func (h *Handler) GetStaticModelDefinitions(c *gin.Context) {
 	if len(models) == 0 {
 		models = h.pluginModelDefinitionsByChannel(channel)
 	}
+	if len(models) == 0 && h.cfg != nil {
+		for _, compat := range h.cfg.OpenAICompatibility {
+			if strings.EqualFold(compat.Name, channel) && len(compat.Models) > 0 {
+				for _, m := range compat.Models {
+					models = append(models, &registry.ModelInfo{ID: m.Name, DisplayName: m.Alias})
+				}
+				break
+			}
+		}
+	}
+	if len(models) == 0 && h.authManager != nil {
+		for _, a := range h.authManager.List() {
+			if strings.EqualFold(a.Provider, channel) {
+				if cached := h.getCachedModels(a.ID); len(cached) > 0 {
+					models = cached
+					break
+				}
+				if a.Metadata != nil {
+					if raw, ok := a.Metadata["cached_models"]; ok && raw != nil {
+						if parsed := parseCachedModelsMetadata(raw); len(parsed) > 0 {
+							models = parsed
+							break
+						}
+					}
+				}
+			}
+		}
+	}
 	if len(models) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unknown channel", "channel": channel})
 		return

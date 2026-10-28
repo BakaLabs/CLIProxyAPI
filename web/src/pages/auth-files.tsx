@@ -59,6 +59,7 @@ import {
   resolveCredentialQuota,
   type ResolvedQuota,
 } from "@/lib/quota-store";
+import { getCachedModels, saveCachedModels } from "@/lib/models-cache";
 
 function formatModTime(raw: string | number | undefined | null): string {
   if (!raw) return "—";
@@ -828,7 +829,7 @@ export function AuthFilesPage() {
       </AlertDialog>
 
       {/* Detail / Edit Properties Sheet */}
-      <DetailSheet entry={selected} onClose={() => setSelected(null)} onChanged={invalidate} />
+      <DetailSheet entry={selected} allEntries={entries} onClose={() => setSelected(null)} onChanged={invalidate} />
     </>
   );
 }
@@ -1301,9 +1302,20 @@ function UploadDialog({ open, onOpenChange, onPick }: { open: boolean; onOpenCha
   );
 }
 
-function DetailSheet({ entry, onClose, onChanged }: { entry: AuthFileEntry | null; onClose: () => void; onChanged: () => void }) {
+function DetailSheet({
+  entry,
+  allEntries,
+  onClose,
+  onChanged,
+}: {
+  entry: AuthFileEntry | null;
+  allEntries?: AuthFileEntry[];
+  onClose: () => void;
+  onChanged: () => void;
+}) {
   const { t } = useTranslation();
   const [models, setModels] = useState<string[] | null>(null);
+  const [syncingModels, setSyncingModels] = useState(false);
   const [priority, setPriority] = useState("");
   const [weight, setWeight] = useState("");
   const [note, setNote] = useState("");
@@ -1314,7 +1326,8 @@ function DetailSheet({ entry, onClose, onChanged }: { entry: AuthFileEntry | nul
     setPriority(entry?.priority !== undefined ? String(entry.priority) : "");
     setWeight(entry?.weight !== undefined ? String(entry.weight) : "");
     setNote(entry?.note ?? "");
-    setModels(null);
+    const cached = entry ? getCachedModels(entry.auth_index || entry.id || entry.name) : null;
+    setModels(cached);
   }, [key]);
 
   const detailRows: [string, string | number][] = [];
@@ -1409,39 +1422,99 @@ function DetailSheet({ entry, onClose, onChanged }: { entry: AuthFileEntry | nul
                 </div>
               </div>
 
-              <div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 w-full text-xs"
-                  onClick={async () => {
-                    if (models) {
-                      setModels(null);
-                      return;
-                    }
-                    try {
-                      const list = await credentials.models(entry.name);
-                      setModels(list.map((model) => model.id));
-                    } catch (error) {
-                      toast.error(errMessage(error));
-                    }
-                  }}
-                >
-                  <ChevronRight className={`size-3.5 transition-transform ${models ? "rotate-90" : ""}`} />
-                  {t("authFiles.viewModels")}
-                </Button>
-                {models ? (
-                  models.length > 0 ? (
-                    <div className="mt-2 flex flex-wrap gap-1">
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 flex-1 text-xs justify-between"
+                    onClick={async () => {
+                      if (models !== null && models.length > 0) {
+                        setModels(null);
+                        return;
+                      }
+                      const cached = getCachedModels(entry.auth_index || entry.id || entry.name);
+                      if (cached) {
+                        setModels(cached);
+                      }
+                      try {
+                        const list = await credentials.models(entry.name);
+                        const ids = list.map((model) => model.id);
+                        setModels(ids);
+                        saveCachedModels([entry.auth_index, entry.id, entry.name], ids);
+                      } catch (error) {
+                        if (!cached) {
+                          toast.error(errMessage(error));
+                        }
+                      }
+                    }}
+                  >
+                    <div className="flex items-center gap-1.5 truncate">
+                      <ChevronRight className={`size-3.5 shrink-0 transition-transform ${models !== null && models.length > 0 ? "rotate-90" : ""}`} />
+                      <span>{t("authFiles.viewModels")}</span>
+                    </div>
+                    {models !== null && models.length > 0 ? (
+                      <span className="text-[10px] text-muted-foreground font-mono font-normal">
+                        ({models.length})
+                      </span>
+                    ) : null}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-2.5 text-xs shrink-0 gap-1.5"
+                    title={t("authFiles.syncModelsHint")}
+                    disabled={syncingModels}
+                    onClick={async () => {
+                      setSyncingModels(true);
+                      try {
+                        const res = await credentials.syncModels({ name: entry.name, auth_index: entry.auth_index });
+                        const ids = res.models.map((m) => m.id);
+                        setModels(ids);
+                        saveCachedModels([entry.auth_index, entry.id, entry.name], ids);
+
+                        if (res.synced_peers && res.synced_peers > 0 && allEntries) {
+                          for (const peer of allEntries) {
+                            if (peer.name === entry.name || peer.id === entry.id) continue;
+                            const sameProvider = (peer.provider || peer.type || "").toLowerCase() === (entry.provider || entry.type || "").toLowerCase();
+                            const samePlan = (peer.plan_type || "").toLowerCase() === (entry.plan_type || "").toLowerCase();
+                            if (sameProvider && samePlan) {
+                              saveCachedModels([peer.auth_index, peer.id, peer.name], ids);
+                            }
+                          }
+                        }
+
+                        if (res.synced_peers && res.synced_peers > 0) {
+                          toast.success(t("authFiles.modelsSyncedWithPeers", { count: ids.length, peers: res.synced_peers }));
+                        } else {
+                          toast.success(t("authFiles.modelsSynced", { count: ids.length }));
+                        }
+                      } catch (error) {
+                        toast.error(`${t("authFiles.modelsSyncFailed")}: ${errMessage(error)}`);
+                      } finally {
+                        setSyncingModels(false);
+                      }
+                    }}
+                  >
+                    <RefreshCw className={`size-3.5 ${syncingModels ? "animate-spin" : ""}`} />
+                    <span className="hidden sm:inline">{t("authFiles.syncModels")}</span>
+                  </Button>
+                </div>
+                {models !== null && models.length > 0 ? (
+                  <div className="rounded-xl border border-border/60 bg-muted/20 p-2.5 space-y-2">
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                      <span>{t("authFiles.availableModelsCount", { count: models.length })}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1 max-h-48 overflow-y-auto pr-1">
                       {models.map((model) => (
-                        <Badge key={model} variant="outline" className="font-mono text-[10px]">
+                        <Badge key={model} variant="outline" className="font-mono text-[10px] bg-background/80">
                           {model}
                         </Badge>
                       ))}
                     </div>
-                  ) : (
-                    <p className="text-muted-foreground mt-2 text-xs">{t("common.empty")}</p>
-                  )
+                  </div>
+                ) : models !== null && models.length === 0 ? (
+                  <p className="text-muted-foreground mt-1 text-xs">{t("common.empty")}</p>
                 ) : null}
               </div>
 

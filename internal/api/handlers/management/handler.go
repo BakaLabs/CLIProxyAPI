@@ -18,6 +18,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginstore"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
@@ -65,6 +66,8 @@ type Handler struct {
 	siwcCommitMu            sync.Mutex
 	manualQuotasMu          sync.RWMutex
 	manualQuotas            map[string]*ManualQuotaSnapshot
+	cachedModelsMu          sync.RWMutex
+	cachedModels            map[string][]*registry.ModelInfo
 }
 
 // ManualQuotaSnapshot captures the result of a manual upstream quota fetch along with baseline request counters.
@@ -94,6 +97,7 @@ func NewHandler(cfg *config.Config, configFilePath string, manager *coreauth.Man
 		allowRemoteOverride: envSecret != "",
 		envSecret:           envSecret,
 		manualQuotas:        make(map[string]*ManualQuotaSnapshot),
+		cachedModels:        make(map[string][]*registry.ModelInfo),
 	}
 	h.startAttemptCleanup()
 	return h

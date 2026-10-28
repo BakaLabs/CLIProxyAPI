@@ -340,11 +340,13 @@ func (h *Handler) GetAuthFileModels(c *gin.Context) {
 
 	// Try to find auth ID via authManager
 	var authID string
+	var targetAuth *coreauth.Auth
 	if h.authManager != nil {
 		auths := h.authManager.List()
 		for _, auth := range auths {
 			if auth.FileName == name || auth.ID == name {
 				authID = auth.ID
+				targetAuth = auth
 				break
 			}
 		}
@@ -354,9 +356,37 @@ func (h *Handler) GetAuthFileModels(c *gin.Context) {
 		authID = name // fallback to filename as ID
 	}
 
-	// Get models from registry
+	if targetAuth != nil && (targetAuth.Disabled || targetAuth.Status == coreauth.StatusDisabled) {
+		c.JSON(200, gin.H{"models": []gin.H{}})
+		return
+	}
+
+	// 1. Get models from registry
 	reg := registry.GetGlobalRegistry()
-	models := reg.GetModelsForClient(authID)
+	var models []*registry.ModelInfo
+	if reg != nil {
+		models = reg.GetModelsForClient(authID)
+	}
+
+	// 2. Fallback to handler in-memory cached models
+	if len(models) == 0 {
+		models = h.getCachedModels(authID)
+		if len(models) == 0 && name != authID {
+			models = h.getCachedModels(name)
+		}
+	}
+
+	// 3. Fallback to persisted cached_models in auth metadata
+	if len(models) == 0 && targetAuth != nil && targetAuth.Metadata != nil {
+		if raw, ok := targetAuth.Metadata["cached_models"]; ok && raw != nil {
+			models = parseCachedModelsMetadata(raw)
+		}
+	}
+
+	// 4. Fallback to channel static models
+	if len(models) == 0 && targetAuth != nil && targetAuth.Provider != "" {
+		models = registry.GetStaticModelDefinitionsByChannel(targetAuth.Provider)
+	}
 
 	result := make([]gin.H, 0, len(models))
 	for _, m := range models {
