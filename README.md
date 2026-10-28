@@ -5,7 +5,7 @@
 > curl -fsSL https://raw.githubusercontent.com/juzi5201314/CLIProxyAPI/main/install.sh | bash
 > ```
 
-本项目为 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 的功能增强与深度优化 Fork 版本（版本号标记为 `*-s*`，当前版本：`v8.0.43-s4`），专注于模型协议保真度、可观测性数据分析、存储治理以及更现代流畅的开箱即用体验。
+本项目为 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 的功能增强与深度优化 Fork 版本（版本号标记为 `*-s*`，当前版本：`v8.0.43-s5`），专注于模型协议保真度、可观测性数据分析、存储治理以及更现代流畅的开箱即用体验。
 
 ---
 
