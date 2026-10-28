@@ -1,9 +1,26 @@
 name: docker-image
 
 on:
+  release:
+    types: [published]
   push:
     tags:
-      - v*
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build (e.g. v8.0.43)'
+        required: false
+        type: string
+        default: ''
+
+concurrency:
+  group: docker-image-${{ inputs.tag || github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
 
 env:
   APP_NAME: CLIProxyAPI
@@ -15,6 +32,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name || github.ref }}
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -24,16 +43,42 @@ jobs:
         run: bash .github/scripts/refresh-model-catalogs.sh
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Login to DockerHub
+        if: secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != ''
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Generate Build Metadata
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
-          echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_ENV
-          echo COMMIT=`git rev-parse --short HEAD` >> $GITHUB_ENV
-          echo BUILD_DATE=`date -u +%Y-%m-%dT%H:%M:%SZ` >> $GITHUB_ENV
+          VERSION="${{ inputs.tag || github.event.release.tag_name || github.ref_name }}"
+          GHCR_REPO="ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "GHCR_REPO=${GHCR_REPO}" >> "$GITHUB_ENV"
+          echo "COMMIT=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+          if [ -n "${DOCKERHUB_USERNAME}" ] && [ -n "${DOCKERHUB_TOKEN}" ]; then
+            echo "HAS_DOCKERHUB=true" >> "$GITHUB_ENV"
+            tags="${GHCR_REPO}:latest-amd64"$'\n'"${GHCR_REPO}:${VERSION}-amd64"$'\n'"${DOCKERHUB_REPO}:latest-amd64"$'\n'"${DOCKERHUB_REPO}:${VERSION}-amd64"
+          else
+            echo "HAS_DOCKERHUB=false" >> "$GITHUB_ENV"
+            tags="${GHCR_REPO}:latest-amd64"$'\n'"${GHCR_REPO}:${VERSION}-amd64"
+          fi
+          {
+            echo "BUILD_TAGS<<EOF"
+            echo "${tags}"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
       - name: Build and push (amd64)
         uses: docker/build-push-action@v6
         with:
@@ -44,15 +89,15 @@ jobs:
             VERSION=${{ env.VERSION }}
             COMMIT=${{ env.COMMIT }}
             BUILD_DATE=${{ env.BUILD_DATE }}
-          tags: |
-            ${{ env.DOCKERHUB_REPO }}:latest-amd64
-            ${{ env.DOCKERHUB_REPO }}:${{ env.VERSION }}-amd64
+          tags: ${{ env.BUILD_TAGS }}
 
   docker_arm64:
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name || github.ref }}
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -62,16 +107,42 @@ jobs:
         run: bash .github/scripts/refresh-model-catalogs.sh
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Login to DockerHub
+        if: secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != ''
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Generate Build Metadata
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
-          echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_ENV
-          echo COMMIT=`git rev-parse --short HEAD` >> $GITHUB_ENV
-          echo BUILD_DATE=`date -u +%Y-%m-%dT%H:%M:%SZ` >> $GITHUB_ENV
+          VERSION="${{ inputs.tag || github.event.release.tag_name || github.ref_name }}"
+          GHCR_REPO="ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "GHCR_REPO=${GHCR_REPO}" >> "$GITHUB_ENV"
+          echo "COMMIT=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+          if [ -n "${DOCKERHUB_USERNAME}" ] && [ -n "${DOCKERHUB_TOKEN}" ]; then
+            echo "HAS_DOCKERHUB=true" >> "$GITHUB_ENV"
+            tags="${GHCR_REPO}:latest-arm64"$'\n'"${GHCR_REPO}:${VERSION}-arm64"$'\n'"${DOCKERHUB_REPO}:latest-arm64"$'\n'"${DOCKERHUB_REPO}:${VERSION}-arm64"
+          else
+            echo "HAS_DOCKERHUB=false" >> "$GITHUB_ENV"
+            tags="${GHCR_REPO}:latest-arm64"$'\n'"${GHCR_REPO}:${VERSION}-arm64"
+          fi
+          {
+            echo "BUILD_TAGS<<EOF"
+            echo "${tags}"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
       - name: Build and push (arm64)
         uses: docker/build-push-action@v6
         with:
@@ -82,9 +153,7 @@ jobs:
             VERSION=${{ env.VERSION }}
             COMMIT=${{ env.COMMIT }}
             BUILD_DATE=${{ env.BUILD_DATE }}
-          tags: |
-            ${{ env.DOCKERHUB_REPO }}:latest-arm64
-            ${{ env.DOCKERHUB_REPO }}:${{ env.VERSION }}-arm64
+          tags: ${{ env.BUILD_TAGS }}
 
   docker_manifest:
     runs-on: ubuntu-latest
@@ -94,29 +163,66 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name || github.ref }}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Login to DockerHub
+        if: secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != ''
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Generate Build Metadata
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
-          echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_ENV
-          echo COMMIT=`git rev-parse --short HEAD` >> $GITHUB_ENV
-          echo BUILD_DATE=`date -u +%Y-%m-%dT%H:%M:%SZ` >> $GITHUB_ENV
+          VERSION="${{ inputs.tag || github.event.release.tag_name || github.ref_name }}"
+          GHCR_REPO="ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "GHCR_REPO=${GHCR_REPO}" >> "$GITHUB_ENV"
+          echo "COMMIT=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+          if [ -n "${DOCKERHUB_USERNAME}" ] && [ -n "${DOCKERHUB_TOKEN}" ]; then
+            echo "HAS_DOCKERHUB=true" >> "$GITHUB_ENV"
+          else
+            echo "HAS_DOCKERHUB=false" >> "$GITHUB_ENV"
+          fi
       - name: Create and push multi-arch manifests
         run: |
+          set -euo pipefail
+
+          # GHCR multi-arch manifests
           docker buildx imagetools create \
-            --tag "${DOCKERHUB_REPO}:latest" \
-            "${DOCKERHUB_REPO}:latest-amd64" \
-            "${DOCKERHUB_REPO}:latest-arm64"
+            --tag "${GHCR_REPO}:latest" \
+            "${GHCR_REPO}:latest-amd64" \
+            "${GHCR_REPO}:latest-arm64"
           docker buildx imagetools create \
-            --tag "${DOCKERHUB_REPO}:${VERSION}" \
-            "${DOCKERHUB_REPO}:${VERSION}-amd64" \
-            "${DOCKERHUB_REPO}:${VERSION}-arm64"
-      - name: Cleanup temporary tags
+            --tag "${GHCR_REPO}:${VERSION}" \
+            "${GHCR_REPO}:${VERSION}-amd64" \
+            "${GHCR_REPO}:${VERSION}-arm64"
+
+          # Docker Hub multi-arch manifests (if configured)
+          if [ "${HAS_DOCKERHUB}" = "true" ]; then
+            docker buildx imagetools create \
+              --tag "${DOCKERHUB_REPO}:latest" \
+              "${DOCKERHUB_REPO}:latest-amd64" \
+              "${DOCKERHUB_REPO}:latest-arm64"
+            docker buildx imagetools create \
+              --tag "${DOCKERHUB_REPO}:${VERSION}" \
+              "${DOCKERHUB_REPO}:${VERSION}-amd64" \
+              "${DOCKERHUB_REPO}:${VERSION}-arm64"
+          fi
+      - name: Cleanup temporary tags on Docker Hub
+        if: env.HAS_DOCKERHUB == 'true'
         continue-on-error: true
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -151,3 +257,100 @@ jobs:
           delete_tag "latest-arm64"
           delete_tag "${VERSION}-amd64"
           delete_tag "${VERSION}-arm64"
+      - name: Update GitHub Release notes
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          max_retries=6
+          retry_interval=10
+          release_found=false
+
+          for ((i=1; i<=max_retries; i++)); do
+            if gh release view "$VERSION" --repo "$GH_REPO" >/dev/null 2>&1; then
+              release_found=true
+              break
+            fi
+            echo "Waiting for release ${VERSION} to be available (attempt ${i}/${max_retries})..."
+            sleep "$retry_interval"
+          done
+
+          if [ "$release_found" = "false" ]; then
+            echo "Release ${VERSION} not found on GitHub. Skipping release notes update."
+            exit 0
+          fi
+
+          python3 - <<'EOF'
+          import os, subprocess, sys
+
+          version = os.environ["VERSION"]
+          ghcr_repo = os.environ["GHCR_REPO"]
+          dockerhub_repo = os.environ.get("DOCKERHUB_REPO", "")
+          has_dockerhub = os.environ.get("HAS_DOCKERHUB", "false") == "true"
+          gh_repo = os.environ["GH_REPO"]
+
+          try:
+              body = subprocess.check_output(
+                  ["gh", "release", "view", version, "--repo", gh_repo, "--json", "body", "-q", ".body"],
+                  text=True
+              )
+          except Exception as e:
+              print(f"Failed to fetch release notes: {e}", file=sys.stderr)
+              sys.exit(0)
+
+          docker_lines = [
+              "<!-- cliproxyapi-docker-images:start -->",
+              "## Docker Images",
+              "",
+              "- Multi-arch images: `linux/amd64`, `linux/arm64`",
+              "",
+              "```bash",
+              "# Pull from GHCR (GitHub Packages)",
+              f"docker pull {ghcr_repo}:{version}",
+              f"docker pull {ghcr_repo}:latest",
+          ]
+
+          if has_dockerhub and dockerhub_repo:
+              docker_lines.extend([
+                  "",
+                  "# Pull from Docker Hub",
+                  f"docker pull {dockerhub_repo}:{version}",
+                  f"docker pull {dockerhub_repo}:latest",
+              ])
+
+          docker_lines.extend([
+              "```",
+              "<!-- cliproxyapi-docker-images:end -->",
+          ])
+          docker_snippet = "\n".join(docker_lines)
+
+          start_marker = "<!-- cliproxyapi-docker-images:start -->"
+          end_marker = "<!-- cliproxyapi-docker-images:end -->"
+          assets_end_marker = "<!-- cliproxyapi-linux-release-assets:end -->"
+
+          if start_marker in body and end_marker in body:
+              before = body.split(start_marker)[0]
+              after = body.split(end_marker)[1]
+              new_body = before.rstrip() + "\n\n" + docker_snippet + "\n\n" + after.lstrip()
+          elif assets_end_marker in body:
+              before, after = body.split(assets_end_marker, 1)
+              new_body = before.rstrip() + "\n" + assets_end_marker + "\n\n" + docker_snippet + "\n\n" + after.lstrip()
+          else:
+              new_body = docker_snippet + "\n\n" + body
+
+          with open("updated_release_notes.md", "w", encoding="utf-8") as f:
+              f.write(new_body.strip() + "\n")
+
+          try:
+              subprocess.check_call([
+                  "gh", "release", "edit", version,
+                  "--repo", gh_repo,
+                  "--notes-file", "updated_release_notes.md"
+              ])
+              print(f"Successfully updated release notes for {version} with Docker pull commands.")
+          except Exception as e:
+              print(f"Failed to update release notes: {e}", file=sys.stderr)
+          EOF
