@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { yaml as yamlLanguage } from "@codemirror/lang-yaml";
 import { oneDark } from "@codemirror/theme-one-dark";
 import CodeMirror from "@uiw/react-codemirror";
 import {
+  Activity,
   AlertTriangle,
+  Blocks,
   Check,
+  ChevronRight,
   Cpu,
   Feather,
   FileCode2,
@@ -53,6 +56,10 @@ const SECTION_ICONS: Record<string, typeof Settings2> = {
   management: Settings2,
   access: KeyRound,
   models: Layers,
+  oauth: KeyRound,
+  multimedia: Layers,
+  observability: Activity,
+  plugins: Blocks,
 };
 
 const SECTION_LABELS: Record<string, string> = {
@@ -64,6 +71,305 @@ const SECTION_LABELS: Record<string, string> = {
   management: "管理端配置 (Management)",
   access: "客户端访问密钥 (Access Keys)",
   models: "模型目录源 (Catalogs)",
+  oauth: "OAuth 授权 (OAuth)",
+  multimedia: "多媒体处理 (Multimedia)",
+  observability: "可观测性 (Observability)",
+  plugins: "插件系统 (Plugins)",
+};
+
+/** Top-level fields already rendered by the dedicated section forms. */
+const HANDLED_PATHS: Record<string, string[]> = {
+  routing: [
+    "strategy",
+    "session-affinity",
+    "session-affinity-ttl",
+    "session-affinity-subagents",
+    "session-affinity-rebind-on",
+    "force-model-prefix",
+    "retry.request-retry",
+    "retry.max-retry-interval",
+    "cooldown.transient-error-cooldown-seconds",
+    "cooldown.disable-cooling",
+    "cooldown.save-cooldown-status",
+  ],
+  requests: [
+    "proxy-url",
+    "tls-handshake-timeout-seconds",
+    "nonstream-keepalive-interval",
+    "passthrough-headers",
+    "streaming.keepalive-seconds",
+  ],
+  upstream: [
+    "codex.response-steering",
+    "codex.stream-bootstrap-buffering",
+    "codex.model-level-cooling",
+    "codex.disable-codex-cloaking",
+    "claude.tool-search",
+    "claude.model-level-cooling",
+    "claude.disable-claude-cloak-mode",
+    "xai.inject-x-search",
+  ],
+  client: [
+    "codex.enable-apply-patch",
+    "codex.optimize-multi-agent-v2",
+    "codex.web-search-result-cache.enabled",
+  ],
+  server: ["host", "port", "max-request-body-bytes", "commercial-mode", "github-token", "discovery.enabled"],
+  management: ["allow-remote", "secret-key", "disable-control-panel"],
+  access: ["api-keys"],
+  models: ["catalog", "codex-catalog", "devin-catalog"],
+};
+
+type FieldMeta = {
+  label: string;
+  hint?: string;
+};
+
+/** Human-readable labels for fields rendered by the automatic fallback editor. */
+const FIELD_META: Record<string, FieldMeta> = {
+  "routing.retry.max-retry-credentials": {
+    label: "最大重试凭据数",
+    hint: "单轮故障切换最多尝试的凭据数量，0 表示不限制。",
+  },
+  "upstream.codex.stream-bootstrap-timeout": {
+    label: "首包缓冲超时",
+    hint: "等待上游首个流式数据包的最长时间。",
+  },
+  "upstream.codex.orphan-delegation-compatibility": {
+    label: "孤立委托兼容",
+    hint: "兼容缺少父级上下文的委托请求。",
+  },
+  "upstream.claude.session-date-pin-days": {
+    label: "会话日期固定天数",
+    hint: "在提示词中固定会话日期的天数。",
+  },
+  "upstream.claude.disable-cloaking-model-list": {
+    label: "禁用 Claude 伪装模型列表",
+    hint: "指定不应用 Claude Code 伪装头的模型。",
+  },
+  "client.codex.web-search-result-cache.ttl": {
+    label: "搜索结果缓存 TTL",
+    hint: "会话内联网搜索结果的保留时长。",
+  },
+  "client.codex.web-search-result-cache.limit": {
+    label: "搜索结果缓存上限",
+    hint: "单个会话最多缓存的搜索结果条数。",
+  },
+  "server.trusted-proxies": {
+    label: "可信代理列表",
+    hint: "允许提供 X-Forwarded-* 请求头的 IP 或 CIDR。",
+  },
+  "server.tls": {
+    label: "TLS 配置",
+    hint: "启用 HTTPS 监听时使用的证书与私钥。",
+  },
+  "server.tls.enable": { label: "启用 TLS", hint: "使用下方证书和私钥启用 HTTPS。" },
+  "server.tls.cert": { label: "证书路径", hint: "PEM 格式的证书文件。" },
+  "server.tls.key": { label: "私钥路径", hint: "PEM 格式的私钥文件。" },
+  "server.discovery": {
+    label: "局域网服务发现",
+    hint: "mDNS / DNS-SD 广播配置。",
+  },
+  "server.discovery.service-name": {
+    label: "服务名前缀",
+    hint: "广播为 CPA-<ShortID> 或指定名称。",
+  },
+  "server.discovery.service-type": {
+    label: "服务类型",
+    hint: "默认使用 _ai-gateway._tcp。",
+  },
+  "server.discovery.subtypes": {
+    label: "协议子类型",
+    hint: "对外广播的 API 协议子类型。",
+  },
+  "server.discovery.interfaces": {
+    label: "网络接口",
+    hint: "指定参与广播的网卡。",
+  },
+  "server.discovery.interfaces.include": {
+    label: "包含接口",
+    hint: "留空自动选择物理网卡。",
+  },
+  "server.discovery.interfaces.exclude": {
+    label: "排除接口",
+    hint: "额外排除的网卡模式。",
+  },
+  "server.discovery.auth-required": {
+    label: "需要凭据",
+    hint: "广播时声明客户端需要认证。",
+  },
+  "server.discovery.advertise-management": {
+    label: "广播管理端",
+    hint: "同时广播管理面板可用性。",
+  },
+  "management.base-url": {
+    label: "管理端基础 URL",
+    hint: "TUI 客户端连接远程管理 API 时使用。",
+  },
+  "oauth.auth-dir": {
+    label: "凭据目录",
+    hint: "OAuth 与 API Key 凭据的存放目录。",
+  },
+  "oauth.providers": {
+    label: "OAuth 供应商",
+    hint: "各上游供应商的 OAuth 行为配置。",
+  },
+  "oauth.providers.aistudio": {
+    label: "AI Studio",
+    hint: "Google AI Studio OAuth 选项。",
+  },
+  "oauth.providers.aistudio.ws-auth": {
+    label: "WebSocket 认证",
+    hint: "使用 WebSocket 认证方式。",
+  },
+  "oauth.providers.codex": {
+    label: "Codex",
+    hint: "Codex OAuth 选项。",
+  },
+  "oauth.providers.codex.live-media-relay": {
+    label: "实时媒体中继",
+    hint: "Codex 实时媒体 WebRTC 中继配置。",
+  },
+  "oauth.providers.codex.live-media-relay.enabled": {
+    label: "启用中继",
+    hint: "开启 Codex 实时媒体中继。",
+  },
+  "oauth.providers.codex.live-media-relay.max-sessions": {
+    label: "最大会话数",
+    hint: "同时保持的实时媒体会话上限。",
+  },
+  "oauth.providers.codex.live-media-relay.disable-private-remote-ips": {
+    label: "禁用私有远端 IP",
+    hint: "拒绝连接到内网地址。",
+  },
+  "oauth.providers.codex.live-media-relay.public-ip": {
+    label: "公网 IP",
+    hint: "对外公布的中继公网地址。",
+  },
+  "oauth.providers.codex.live-media-relay.udp-port-min": {
+    label: "UDP 端口下限",
+    hint: "中继使用的 UDP 端口范围起点。",
+  },
+  "oauth.providers.codex.live-media-relay.udp-port-max": {
+    label: "UDP 端口上限",
+    hint: "中继使用的 UDP 端口范围终点。",
+  },
+  "oauth.providers.codex.signin-with-chatgpt-identifier": {
+    label: "登录标识",
+    hint: "登录时使用的 ChatGPT 客户端标识。",
+  },
+  "oauth.providers.antigravity": {
+    label: "Antigravity",
+    hint: "Antigravity OAuth 选项。",
+  },
+  "oauth.providers.antigravity.antigravity-credits": {
+    label: "Antigravity 积分",
+    hint: "使用 Antigravity 积分额度。",
+  },
+  multimedia: {
+    label: "多媒体处理",
+    hint: "图片、视频等多模态能力配置。",
+  },
+  "multimedia.disable-image-generation": {
+    label: "禁用图片生成",
+    hint: "关闭图片生成能力。",
+  },
+  "multimedia.video-result-auth-cache-ttl": {
+    label: "视频结果鉴权缓存 TTL",
+    hint: "视频结果下载鉴权的缓存时长。",
+  },
+  observability: {
+    label: "可观测性",
+    hint: "日志、请求数据库、用量统计与 pprof 配置。",
+  },
+  "observability.logs": {
+    label: "日志",
+    hint: "服务端日志与请求日志配置。",
+  },
+  "observability.logs.debug": {
+    label: "调试日志",
+    hint: "输出更详细的调试日志。",
+  },
+  "observability.logs.logging-to-file": {
+    label: "文件日志",
+    hint: "将日志写入文件。",
+  },
+  "observability.logs.logs-max-total-size-mb": {
+    label: "日志总大小上限",
+    hint: "日志文件总大小上限（MB），0 表示不限制。",
+  },
+  "observability.logs.error-logs-max-files": {
+    label: "错误日志保留数",
+    hint: "保留的 error-*.log 文件数量。",
+  },
+  "observability.logs.request-log": {
+    label: "请求日志",
+    hint: "记录代理请求与响应日志。",
+  },
+  "observability.request-db": {
+    label: "请求数据库",
+    hint: "SQLite 请求元数据存储。",
+  },
+  "observability.request-db.enabled": {
+    label: "启用请求数据库",
+    hint: "记录每次请求的模型、Token、延迟等元数据。",
+  },
+  "observability.request-db.path": {
+    label: "数据库路径",
+    hint: "留空使用 auth-dir/requestlog.db。",
+  },
+  "observability.request-db.retention-days": {
+    label: "保留天数",
+    hint: "超过天数的记录会被清理，0 表示永久保留。",
+  },
+  "observability.request-db.preview-bytes": {
+    label: "消息预览字节数",
+    hint: "额外保存的请求/响应体字节数，0 表示不保存。",
+  },
+  "observability.request-db.error-body-max-bytes": {
+    label: "错误体上限",
+    hint: "失败请求上游错误体的最大保存长度。",
+  },
+  "observability.usage": {
+    label: "用量统计",
+    hint: "内存用量聚合与队列配置。",
+  },
+  "observability.usage.usage-statistics-enabled": {
+    label: "启用用量统计",
+    hint: "启用内存用量统计聚合。",
+  },
+  "observability.usage.redis-usage-queue-retention-seconds": {
+    label: "队列保留秒数",
+    hint: "用量队列在内存中的保留时间。",
+  },
+  "observability.pprof": {
+    label: "pprof",
+    hint: "Go 性能分析调试服务。",
+  },
+  "observability.pprof.enable": {
+    label: "启用 pprof",
+    hint: "开启 pprof HTTP 调试服务。",
+  },
+  "observability.pprof.addr": {
+    label: "监听地址",
+    hint: "建议仅绑定 localhost。",
+  },
+  plugins: {
+    label: "插件系统",
+    hint: "动态库插件配置。",
+  },
+  "plugins.enabled": {
+    label: "启用插件",
+    hint: "加载 plugins 目录下的动态库插件。",
+  },
+  "plugins.dir": {
+    label: "插件目录",
+    hint: "动态库插件所在目录。",
+  },
+  "plugins.configs": {
+    label: "插件实例配置",
+    hint: "以插件 ID 为键的实例级配置。",
+  },
 };
 
 export function ConfigPage() {
@@ -78,7 +384,7 @@ export function ConfigPage() {
 
   const sections = useMemo(() => {
     const rawKeys = Object.keys(doc.data?.config ?? {});
-    const priority = ["routing", "requests", "upstream", "client", "server", "management", "access", "models"];
+    const priority = ["routing", "requests", "upstream", "client", "server", "management", "access", "models", "oauth", "multimedia", "observability", "plugins"];
     const ordered = [...priority.filter((k) => rawKeys.includes(k)), ...rawKeys.filter((k) => !priority.includes(k) && k !== "config-version")];
     return ordered;
   }, [doc.data]);
@@ -327,6 +633,7 @@ function ConfigSectionEditor({
   onChange: (value: Doc) => void;
 }) {
   const current = draft ?? original;
+  const handled = HANDLED_PATHS[name];
   const [mode, setMode] = useState<"form" | "raw">("form");
   const [rawText, setRawText] = useState("");
 
@@ -383,24 +690,29 @@ function ConfigSectionEditor({
             应用此 JSON 内容
           </Button>
         </div>
-      ) : name === "routing" ? (
-        <RoutingForm current={current} update={update} />
-      ) : name === "requests" ? (
-        <RequestsForm current={current} update={update} />
-      ) : name === "upstream" ? (
-        <UpstreamForm current={current} update={update} />
-      ) : name === "client" ? (
-        <ClientForm current={current} update={update} />
-      ) : name === "server" ? (
-        <ServerForm current={current} update={update} />
-      ) : name === "management" ? (
-        <ManagementForm current={current} update={update} />
-      ) : name === "access" ? (
-        <AccessForm current={current} update={update} />
-      ) : name === "models" ? (
-        <ModelsForm current={current} update={update} />
       ) : (
-        <GenericForm current={current} update={update} />
+        <div className="space-y-6">
+          {name === "routing" ? (
+            <RoutingForm current={current} update={update} />
+          ) : name === "requests" ? (
+            <RequestsForm current={current} update={update} />
+          ) : name === "upstream" ? (
+            <UpstreamForm current={current} update={update} />
+          ) : name === "client" ? (
+            <ClientForm current={current} update={update} />
+          ) : name === "server" ? (
+            <ServerForm current={current} update={update} />
+          ) : name === "management" ? (
+            <ManagementForm current={current} update={update} />
+          ) : name === "access" ? (
+            <AccessForm current={current} update={update} />
+          ) : name === "models" ? (
+            <ModelsForm current={current} update={update} />
+          ) : (
+            <GenericFields value={current} onChange={update} prefix={name} />
+          )}
+          {handled ? <GenericFallback current={current} update={update} hidden={handled} prefix={name} /> : null}
+        </div>
       )}
     </div>
   );
@@ -942,32 +1254,345 @@ function ModelsForm({ current, update }: { current: Doc; update: (changes: Parti
   );
 }
 
-function GenericForm({ current, update }: { current: Doc; update: (changes: Partial<Doc>) => void }) {
+type GenericFieldsProps = {
+  value: Doc;
+  onChange: (next: Doc) => void;
+  hidden?: string[];
+  prefix?: string;
+  depth?: number;
+};
+
+type GenericFieldProps = {
+  label: string;
+  path: string;
+  value: unknown;
+  hidden: string[];
+  onChange: (next: unknown) => void;
+  depth: number;
+};
+
+function isDoc(value: unknown): value is Doc {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasVisibleEntries(value: Doc, hidden: string[], prefix = ""): boolean {
+  return Object.entries(value).some(([key, child]) => {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (hidden.includes(path)) return false;
+    return isDoc(child) ? hasVisibleEntries(child, hidden, path) : true;
+  });
+}
+
+function GenericFallback({
+  current,
+  update,
+  hidden,
+  prefix,
+}: {
+  current: Doc;
+  update: (changes: Partial<Doc>) => void;
+  hidden: string[];
+  prefix: string;
+}) {
+  const visibleHidden = hidden.map((path) => `${prefix}.${path}`);
+  if (!hasVisibleEntries(current, visibleHidden, prefix)) return null;
   return (
-    <div className="space-y-3">
-      {Object.entries(current).map(([key, val]) => (
-        <div key={key} className="flex items-center justify-between gap-4 py-2 border-b border-slate-100 last:border-0 dark:border-slate-800">
-          <span className="font-mono text-xs text-slate-700 dark:text-slate-300">{key}</span>
-          {typeof val === "boolean" ? (
-            <Switch checked={val} onCheckedChange={(checked) => update({ [key]: checked })} />
-          ) : (
-            <Input
-              className="h-8 w-64 text-xs font-mono rounded-lg"
-              value={typeof val === "object" ? JSON.stringify(val) : String(val ?? "")}
-              onChange={(e) => {
-                let parsed: unknown = e.target.value;
-                try {
-                  parsed = JSON.parse(e.target.value);
-                } catch {
-                  // Fall back to plain string when JSON parsing fails
-                }
-                update({ [key]: parsed });
-              }}
-            />
-          )}
-        </div>
-      ))}
+    <div className="space-y-3 border-t border-slate-100 pt-4 dark:border-slate-800">
+      <div>
+        <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">其他配置项</h4>
+        <p className="mt-1 text-[11px] text-slate-400">
+          以上表单未覆盖的字段会在这里自动展示，支持嵌套对象与数组。
+        </p>
+      </div>
+      <GenericFields value={current} onChange={update} hidden={visibleHidden} prefix={prefix} />
     </div>
+  );
+}
+
+function GenericFields({ value, onChange, hidden = [], prefix = "", depth = 0 }: GenericFieldsProps) {
+  return (
+    <div className="space-y-2.5">
+      {Object.entries(value).map(([key, child]) => {
+        const path = prefix ? `${prefix}.${key}` : key;
+        if (hidden.includes(path)) return null;
+        if (isDoc(child) && !hasVisibleEntries(child, hidden, path)) return null;
+        return (
+          <GenericField
+            key={path}
+            label={key}
+            path={path}
+            value={child}
+            hidden={hidden}
+            depth={depth}
+            onChange={(next) => onChange({ ...value, [key]: next })}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function FieldRow({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg px-3 py-2.5 transition-colors hover:bg-slate-50/60 sm:flex-row sm:items-start sm:justify-between dark:hover:bg-slate-900/40">
+      <div className="min-w-0">
+        <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{label}</p>
+        {hint ? <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400">{hint}</p> : null}
+      </div>
+      <div className="w-full shrink-0 sm:w-auto">{children}</div>
+    </div>
+  );
+}
+
+function CollapsibleGroup({
+  label,
+  hint,
+  defaultOpen,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  defaultOpen: boolean;
+  children: ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(defaultOpen);
+
+  return (
+    <div className="rounded-xl border border-slate-200/70 bg-slate-50/30 dark:border-slate-800 dark:bg-slate-950/30">
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
+        className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+      >
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{label}</p>
+          {hint ? <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400">{hint}</p> : null}
+        </div>
+        <ChevronRight
+          className={cn(
+            "size-3.5 shrink-0 text-slate-400 transition-transform duration-200",
+            expanded && "rotate-90",
+          )}
+        />
+      </button>
+      <div
+        className={cn(
+          "grid transition-[grid-template-rows] duration-200 ease-out",
+          expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+        )}
+      >
+        <div className="overflow-hidden">
+          <div className="border-t border-slate-200/70 p-3 dark:border-slate-800">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GenericField({ label, path, value, hidden, onChange, depth }: GenericFieldProps) {
+  const meta = FIELD_META[path] ?? { label };
+
+  if (typeof value === "boolean") {
+    return (
+      <FieldRow label={meta.label} hint={meta.hint}>
+        <Switch checked={value} onCheckedChange={onChange} />
+      </FieldRow>
+    );
+  }
+
+  if (typeof value === "number") {
+    return (
+      <FieldRow label={meta.label} hint={meta.hint}>
+        <NumberInput value={value} onChange={onChange} />
+      </FieldRow>
+    );
+  }
+
+  if (typeof value === "string" || value === null) {
+    const secret = /(?:secret|token|password|api[-_]?key)/i.test(path);
+    const long = typeof value === "string" && (value.length > 80 || value.includes("\n"));
+
+    if (long) {
+      return (
+        <div className="px-3 py-2.5">
+          <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{meta.label}</p>
+          {meta.hint ? <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400">{meta.hint}</p> : null}
+          <textarea
+            className="mt-2 h-24 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 p-2 font-mono text-xs dark:border-slate-800 dark:bg-slate-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            value={typeof value === "string" ? value : ""}
+            onChange={(e) => onChange(e.target.value)}
+            spellCheck={false}
+          />
+        </div>
+      );
+    }
+
+    return (
+      <FieldRow label={meta.label} hint={meta.hint}>
+        <Input
+          type={secret ? "password" : "text"}
+          className="h-8 w-full rounded-lg font-mono text-xs sm:w-64"
+          value={value ?? ""}
+          placeholder={value === null ? "null" : undefined}
+          onChange={(e) => onChange(value === null && e.target.value === "" ? null : e.target.value)}
+        />
+      </FieldRow>
+    );
+  }
+
+  if (Array.isArray(value)) {
+    return (
+      <GenericArray
+        label={meta.label}
+        hint={meta.hint}
+        path={path}
+        value={value}
+        hidden={hidden}
+        depth={depth}
+        onChange={onChange}
+      />
+    );
+  }
+
+  if (isDoc(value)) {
+    return (
+      <CollapsibleGroup label={meta.label} hint={meta.hint} defaultOpen={depth === 0}>
+        <GenericFields value={value} onChange={onChange} hidden={hidden} prefix={path} depth={depth + 1} />
+      </CollapsibleGroup>
+    );
+  }
+
+  return null;
+}
+
+function GenericArray({
+  label,
+  hint,
+  path,
+  value,
+  hidden,
+  onChange,
+  depth,
+}: {
+  label: string;
+  hint?: string;
+  path: string;
+  value: unknown[];
+  hidden: string[];
+  onChange: (next: unknown[]) => void;
+  depth: number;
+}) {
+  const addItem = () => onChange([...value, defaultValueFor(value[0])]);
+
+  return (
+    <div className="rounded-xl border border-slate-200/70 dark:border-slate-800">
+      <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{label}</p>
+          {hint ? <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400">{hint}</p> : null}
+          <p className="mt-0.5 text-[10px] text-slate-400">{value.length} 项</p>
+        </div>
+        <Button variant="outline" size="sm" className="h-7 rounded-lg text-xs" onClick={addItem}>
+          <Plus className="mr-1 size-3.5" />
+          添加
+        </Button>
+      </div>
+
+      <div className="divide-y divide-slate-100 border-t border-slate-200/70 dark:divide-slate-800/70 dark:border-slate-800">
+        {value.map((item, index) => {
+          const itemPath = `${path}.${index}`;
+          if (hidden.includes(itemPath)) return null;
+          const setItem = (next: unknown) => {
+            const copy = [...value];
+            copy[index] = next;
+            onChange(copy);
+          };
+          const primitive = item === null || typeof item !== "object";
+
+          return (
+            <div key={itemPath} className="flex items-start gap-2 px-3 py-2">
+              {primitive ? (
+                <>
+                  <span className="mt-2 w-5 shrink-0 text-center font-mono text-[10px] text-slate-400">{index}</span>
+                  <div className="min-w-0 flex-1">
+                    {typeof item === "boolean" ? (
+                      <div className="flex justify-end">
+                        <Switch checked={item} onCheckedChange={setItem} />
+                      </div>
+                    ) : typeof item === "number" ? (
+                      <NumberInput value={item} onChange={setItem} />
+                    ) : (
+                      <Input
+                        className="h-8 w-full rounded-lg font-mono text-xs"
+                        value={item == null ? "" : String(item)}
+                        placeholder={item === null ? "null" : undefined}
+                        onChange={(e) => setItem(item === null && e.target.value === "" ? null : e.target.value)}
+                      />
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="min-w-0 flex-1">
+                  <GenericField
+                    label={`[${index}]`}
+                    path={itemPath}
+                    value={item}
+                    hidden={hidden}
+                    depth={depth + 1}
+                    onChange={setItem}
+                  />
+                </div>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 shrink-0 rounded-lg text-rose-500 hover:text-rose-600"
+                onClick={() => onChange(value.filter((_, i) => i !== index))}
+                title="删除"
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            </div>
+          );
+        })}
+        {value.length === 0 ? <p className="px-3 py-3 text-[11px] text-slate-400">空数组</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function defaultValueFor(value: unknown): unknown {
+  if (typeof value === "boolean") return false;
+  if (typeof value === "number") return 0;
+  if (typeof value === "string") return "";
+  if (Array.isArray(value)) return [];
+  if (isDoc(value)) return {};
+  return "";
+}
+
+function NumberInput({ value, onChange }: { value: number; onChange: (next: number) => void }) {
+  const [text, setText] = useState(String(value));
+
+  useEffect(() => {
+    setText(String(value));
+  }, [value]);
+
+  return (
+    <Input
+      type="number"
+      className="h-8 w-40 rounded-lg font-mono text-xs"
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => {
+        const next = Number(text);
+        if (text.trim() !== "" && Number.isFinite(next)) onChange(next);
+        else setText(String(value));
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+      }}
+    />
   );
 }
 
