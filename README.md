@@ -1,72 +1,39 @@
 # CLIProxyAPI
 
-> **Linux 一键安装 / 平滑升级命令**：
+> **Linux 一键安装 / 平滑升级**：
 > ```bash
 > curl -fsSL https://raw.githubusercontent.com/juzi5201314/CLIProxyAPI/main/install.sh | bash
 > ```
+> 常用管理命令：`~/cliproxyapi/install.sh [status | auth | check-config | update | uninstall]`
 >
 > **Docker**：
 > ```bash
 > docker pull ghcr.io/juzi5201314/cliproxyapi:latest
 > ```
 
-本项目为 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 的功能增强与深度优化 Fork 版本（版本号标记为 `*-s*`，当前版本：`v8.0.43-s5`），专注于模型协议保真度、可观测性数据分析、存储治理以及更现代流畅的开箱即用体验。
+本项目为 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 的功能增强 Fork 版本（版本号标记为 `*-s*`，当前版本：`v8.0.43-s5`）。在官方版本基础上，主要对思考参数透传、请求日志数据库、管理面板与可视化体验进行了改进。
 
 ---
 
-<img width="1647" height="867" alt="bd848a104c9ed1fa0392e78b254e7407" src="https://github.com/user-attachments/assets/0f8d51a9-0b7d-4d13-ae14-6a290aad4a71" />
+<img width="1647" height="867" alt="CLIProxyAPI Web Dashboard" src="https://github.com/user-attachments/assets/0f8d51a9-0b7d-4d13-ae14-6a290aad4a71" />
 
+## 🌟 Fork 核心特性
 
-## 🌟 Fork 核心特性与改进
+### 1. 思考力度（Reasoning / Thinking）保真透传
+- **参数不被强制截断**：移除原版对自定义模型 thinking 参数的限制，客户端设定的思考等级原样透传给上游。
+- **跨协议平滑映射**：在 OpenAI、Codex 与 Claude 等不同协议互转时，准确对齐思考强度。
+- **缺失思考 Token 自动补算**：部分第三方 API 返回思考内容但未提供 `thinking_tokens` 时，集成分词器在本地自动估算补齐，保证用量与费用统计准确。
 
-### 1. 思考力度（Reasoning / Thinking）保真透传与本地估算
-- **自定义模型不钳制思考等级**：彻底移除原版中按模型声明 `thinking` 能力时对参数的强制裁剪与截断，客户端请求中指定的思考力度原样透传至上游服务。
-- **高保真跨协议转换**：OpenAI / Codex 与 Claude 等跨协议请求转换时，保持思考力度精确对齐（`xhigh` / `max` 映射为 Claude 高强度，`auto` 沿用上游原生策略且不额外注入多余字段）。
-- **思考 Token 本地估算兜底**：针对部分第三方中转 API 返回思考内容却省略 `output_tokens_details.thinking_tokens` 的情况，集成分词器本地自动估算推理 Token 数，确保用量统计与思考费用计算精确无漏。
+### 2. 高效压缩的请求数据库（Request DB）
+- **轻量嵌入式存储**：基于纯 Go SQLite 驱动，无额外外部依赖与 CGO，单文件本地持久化。
+- **zstd 高压缩比**：请求头与报文详情经 zstd 压缩入库，节省 70%+ 存储空间；默认长期保留，支持按天轮转或手动清理。
+- **细粒度指标记录**：精准记录每笔请求的 Token 明细（包含缓存命中与思考量）、真实调用模型、延迟、首字时间（TTFT）与状态码。
 
-### 2. 高性能独立请求数据库（`observability.request-db`）
-- **本地 SQLite 驱动**：使用现代纯 Go 驱动嵌入式运行，不引入 CGO 动态依赖。
-- **细粒度指标持久化**：每笔请求持久化记录 Token 明细（Prompt / Completion / Thinking / Cache 命中率）、模型调用链（请求别名 → 实际上游模型 → 响应模型）、服务层级、延迟、TTFT、HTTP 状态码及 TraceID。
-- **提示词总 Tokens 准确计量**：严格规范全协议提示词 Token 统计（Total Input = Uncached + Cache Read + Cache Creation），杜绝带缓存请求在外部统计为 0 输入的偏差，自动兼容平滑迁移历史表结构。
-- **zstd 高压缩 BLOB**：请求/响应头、错误正文与报文预览均经 zstd 二进制压缩入库，节省超过 70% 存储。
-- **默认永久保存与可调轮转**：日志默认永久保留不自动过期，支持按天自定义保留周期（`retention-days`）或在控制台按时间/数据量随时手动清理。
-- **与传统文件日志相互解耦**：与系统原有的 `request-log` 文本文件日志完全独立，支持高并发轻量记录。
-
-### 3. 深度可观测性监控大屏与实时日志流
-- **自定义模型价格管理**：内置主流厂商定价库的基础上，支持在前端仪表板中直观配置与持久化自定义模型单价（输入/输出/缓存/思考），支持从已有缓存一键填入，完美支持私有/小众模型。
-- **调用链路与上游 Host 直观标注**：请求日志直观标注实际上游主机 `provider(host)`，并在客户端思考等级与实际上游响应等级不同步时以 `requested → actual` 箭头显著标明转换状态。
-- **多维度筛选与下钻**：支持多选过滤模型、供应商、API Key、会话、状态码，联动 TPS 时序图、分位延迟 (Avg / P50 / P90 / P99)、首字时间 (TTFT) 及供应商吞吐占比。
-- **实时请求流 (SSE)**：高密度流水线直观展示实时请求链路、Token 分布与状态胶囊，支持实时缓冲控制（暂停/继续）与关联 Trace 追踪。
-
-### 4. 高可用容错调度与网络韧性
-- **HTTP/2 协议级重置与网关超时自动重试**：将 HTTP/2 `stream error`（如对端发送的 `PROTOCOL_ERROR`、`INTERNAL_ERROR`、`GOAWAY` 等）纳入传输层瞬态故障分类。当上游由于生成缓慢被中间网关超时掐断时，CPA 自动识别并轮换凭据平滑重试，杜绝客户端遭遇 500 中断与 `Body is disturbed or locked` 报错。
-- **视图偏好记忆**：供应商管理页面自动本地记住用户选择的卡片视图或表格视图偏好，刷新不丢失。
-
-### 5. 开箱即用内嵌式管理面板 (`web/`)
-- **零外部网络依赖**：编译期直接将管理面板（React 19 + Vite + Tailwind v4 + shadcn/ui）内嵌进二进制文件，打开 `/management` 或 `/management.html` 即用，彻底杜绝从 GitHub 动态拉取面板可能遭遇的卡死、网络超时或未预期版本变动风险。原 `management.panel-github-repository` / `disable-auto-update-panel` 配置项已废弃（保留解析但不生效）。
-- **移动端全自适应支持**：全站响应式适配手机、平板及宽屏桌面，完善移动端抽屉导航、折叠侧栏与触控操作。
-- **现代化接口调试 (Playground)**：支持多模态图片/文件上传测试、系统提示词快捷预设、流式响应随时打断、历史消息原地编辑与重新发送。
-- **内置纯净 Markdown / 富文本渲染**：零臃肿依赖实现代码块语法着色、表格与排版美化，单文件体积更小、加载更迅速。
-
----
-
-## 一键安装与升级 (Linux)
-
-使用一键脚本自动安装或平滑升级本 fork 版本：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/juzi5201314/CLIProxyAPI/main/install.sh | bash
-```
-
-常用管理命令：
-```bash
-~/cliproxyapi/install.sh status        # 查看服务状态与运行端口
-~/cliproxyapi/install.sh auth          # 查看各模型供应商登录指南
-~/cliproxyapi/install.sh check-config  # 校验当前配置与 API Key
-~/cliproxyapi/install.sh generate-key  # 生成新的 API Key
-~/cliproxyapi/install.sh update        # 检测并升级到最新发布版本
-~/cliproxyapi/install.sh uninstall     # 卸载服务
-```
+### 3. 内置现代化管理面板（Web Dashboard）
+- **单二进制直接内嵌**：基于 React 19 + shadcn/ui，编译期直接打入可执行文件，访问 `/management` 即可使用，无需联网从 GitHub 动态拉取。
+- **实时日志与监控图表**：内置 SSE 实时请求流、延迟与 TPS 统计、上游主机直观标注与链路追踪。
+- **模型定价与成本分析**：内置主流模型价格表，支持自定义单价设置，直观核算调用成本。
+- **更好用的 Playground**：支持多模态文件上传、流式打断、历史消息原地编辑与重新发送，并适配移动端操作。
 
 ---
 
