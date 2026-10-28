@@ -4,10 +4,18 @@
 > ```bash
 > curl -fsSL https://raw.githubusercontent.com/juzi5201314/CLIProxyAPI/main/install.sh | bash
 > ```
+>
+> **Docker**：
+> ```bash
+> docker pull ghcr.io/juzi5201314/cliproxyapi:latest
+> ```
 
 本项目为 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 的功能增强与深度优化 Fork 版本（版本号标记为 `*-s*`，当前版本：`v8.0.43-s5`），专注于模型协议保真度、可观测性数据分析、存储治理以及更现代流畅的开箱即用体验。
 
 ---
+
+<img width="1647" height="867" alt="bd848a104c9ed1fa0392e78b254e7407" src="https://github.com/user-attachments/assets/0f8d51a9-0b7d-4d13-ae14-6a290aad4a71" />
+
 
 ## 🌟 Fork 核心特性与改进
 
