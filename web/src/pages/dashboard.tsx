@@ -24,10 +24,9 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
-  Sparkles,
   X,
 } from "lucide-react";
-import { Mascot } from "@/components/shared/mascot";
+import bannerImage from "@/assets/dashboard-banner.png";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -65,6 +64,8 @@ import { errStatus, type BreakdownRow } from "@/api/types";
 import { usePrefsStore, type TimeRange } from "@/stores/prefs";
 import type { RecordFilter } from "@/api/management";
 import { ModelPricingDialog } from "@/components/model-pricing-dialog";
+
+const DASHBOARD_CARD_SURFACE = "rounded-2xl border border-slate-200/80 bg-white/95 shadow-2xs dark:border-slate-800/80 dark:bg-slate-900/90";
 
 const chartConfig = {
   requests: { label: "Requests", color: "var(--chart-1)" },
@@ -288,19 +289,21 @@ export function DashboardPage() {
       </div>
 
       {/* Hero Welcome Banner */}
-      <div className="mb-6 relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-500 p-6 text-white shadow-sm">
-        <div className="absolute right-8 -bottom-4 opacity-90 hidden sm:block">
-          <Mascot size={115} mood="happy" />
+      <div className="mb-6 relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white/95 p-6 text-slate-900 shadow-2xs dark:border-slate-800/80 dark:bg-slate-900/90 dark:text-slate-100">
+        <div className="absolute right-8 -bottom-4 hidden sm:block">
+          <img
+            src={bannerImage}
+            alt=""
+            width={115}
+            height={115}
+            className="size-[115px] object-contain"
+          />
         </div>
-        <div className="relative z-10 max-w-xl">
-          <div className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-medium backdrop-blur-md mb-2">
-            <Sparkles className="size-3 text-amber-300" />
-            <span>{t("dashboard.heroBadge")}</span>
-          </div>
-          <h2 className="text-lg sm:text-xl font-bold tracking-tight">
+        <div className="relative z-10 max-w-xl pr-0 sm:pr-36">
+          <h2 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
             {t("dashboard.heroTitle")}
           </h2>
-          <p className="mt-1 text-xs text-blue-100/90 leading-relaxed">
+          <p className="mt-1 text-xs text-slate-500 leading-relaxed dark:text-slate-400">
             {t("dashboard.heroDesc")}
           </p>
         </div>
@@ -387,6 +390,7 @@ export function DashboardPage() {
       <div className="mt-6 grid grid-cols-1 gap-5 xl:grid-cols-2">
         {/* Traffic Chart */}
         <SectionCard
+          className={DASHBOARD_CARD_SURFACE}
           title={t("dashboard.charts.traffic")}
           hint={t("dashboard.charts.trafficHint", { interval: stepLabel })}
           actions={
@@ -427,6 +431,7 @@ export function DashboardPage() {
 
         {/* Cost Trend Chart */}
         <SectionCard
+          className={DASHBOARD_CARD_SURFACE}
           title={t("dashboard.charts.cost", "费用消耗走势")}
           hint={t("dashboard.charts.costHint", "按模型单价每 {{interval}} 预估消费 (USD)", { interval: stepLabel })}
         >
@@ -459,7 +464,7 @@ export function DashboardPage() {
         </SectionCard>
 
         {/* Token Input vs Output Stacked Chart */}
-        <SectionCard title={t("dashboard.charts.tokens")} hint={t("dashboard.charts.tokensHint", { interval: stepLabel })}>
+        <SectionCard className={DASHBOARD_CARD_SURFACE} title={t("dashboard.charts.tokens")} hint={t("dashboard.charts.tokensHint", { interval: stepLabel })}>
           <ChartContainer config={chartConfig} className="h-60 w-full">
             <AreaChart data={points} margin={{ left: 4, right: 8 }}>
               <CartesianGrid vertical={false} strokeDasharray="3 3" opacity={0.4} />
@@ -484,7 +489,7 @@ export function DashboardPage() {
         </SectionCard>
 
         {/* Latency and TTFT Chart */}
-        <SectionCard title={t("dashboard.charts.latency")} hint={t("dashboard.charts.latencyHint")}>
+        <SectionCard className={DASHBOARD_CARD_SURFACE} title={t("dashboard.charts.latency")} hint={t("dashboard.charts.latencyHint")}>
           <ChartContainer config={chartConfig} className="h-60 w-full">
             <LineChart data={points} margin={{ left: 4, right: 8 }}>
               <CartesianGrid vertical={false} strokeDasharray="3 3" opacity={0.4} />
@@ -649,7 +654,7 @@ function ComprehensiveBreakdownTable({
   };
 
   return (
-    <div className="card-surface overflow-hidden">
+    <div className={`${DASHBOARD_CARD_SURFACE} overflow-hidden`}>
       {/* Table Header Controls */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 p-4">
         <div className="flex items-center gap-3">

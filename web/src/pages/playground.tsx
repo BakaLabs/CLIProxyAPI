@@ -13,12 +13,14 @@ import {
   Cpu,
   Eraser,
   ImagePlus,
-  PanelRight,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pause,
   Pencil,
   Plus,
   RotateCw,
   Search,
+  Settings2,
   Sliders,
   Terminal,
   Trash2,
@@ -40,6 +42,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ALL_KINDS, type Entry } from "@/components/providers/provider-tools";
 import { MarkdownViewer } from "@/components/shared/markdown-viewer";
 import { providerLists } from "@/api/management";
@@ -192,7 +195,12 @@ export function PlaygroundPage() {
 
   // Panels & Tabs
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [rightPanelTab, setRightPanelTab] = useState<"params" | "inspector" | null>("params");
+  const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
+  const [rightPanelTab, setRightPanelTab] = useState<"params" | "inspector" | null>(() =>
+    typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches ? "params" : null,
+  );
+  const [lastPanelTab, setLastPanelTab] = useState<"params" | "inspector">("params");
+  const panelTab = rightPanelTab ?? lastPanelTab;
   const [inspectorMsgId, setInspectorMsgId] = useState<string | null>(null);
   const [systemPromptExpanded, setSystemPromptExpanded] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -205,6 +213,10 @@ export function PlaygroundPage() {
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    if (rightPanelTab) setLastPanelTab(rightPanelTab);
+  }, [rightPanelTab]);
 
   // Reset message editing when session switches
   useEffect(() => {
@@ -873,25 +885,50 @@ export function PlaygroundPage() {
   );
 
   return (
-    <div className="flex h-[calc(100vh-5.5rem)] overflow-hidden rounded-3xl border border-slate-200/80 bg-white/80 shadow-xl backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/80">
+    <div className="flex h-[calc(100vh-3.5rem)] -m-4 overflow-hidden pb-14 sm:-m-6 md:-m-8 md:pb-0">
       {/* ---------------------------------------------------------------- Column 1: Test Sessions Manager */}
-      {!sidebarCollapsed && (
-        <div className="hidden lg:flex w-64 flex-col border-r border-slate-200/60 bg-slate-50/50 dark:border-slate-800/60 dark:bg-slate-950/40 select-none">
+      {mobileSessionsOpen && (
+        <div
+          className="fixed inset-0 z-40 animate-in fade-in duration-200 bg-slate-950/40 backdrop-blur-sm lg:hidden"
+          onClick={() => setMobileSessionsOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      <div
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 w-64 overflow-hidden transition-transform duration-200 ease-in-out",
+          "lg:static lg:z-auto lg:shrink-0 lg:translate-x-0 lg:transition-[width]",
+          mobileSessionsOpen ? "translate-x-0" : "-translate-x-full",
+          sidebarCollapsed ? "lg:w-0" : "lg:w-64",
+        )}
+      >
+        <div className="flex h-full w-64 flex-col border-r border-slate-200/60 bg-slate-50 select-none dark:border-slate-800/60 dark:bg-slate-950 lg:bg-slate-50/50 lg:dark:bg-slate-950/40">
           {/* Header & Add Button */}
           <div className="flex items-center justify-between p-3 border-b border-slate-200/60 dark:border-slate-800/60">
             <div className="flex items-center gap-2">
               <Terminal className="size-4 text-blue-600 dark:text-blue-400" />
               <span className="font-bold text-xs text-slate-800 dark:text-slate-200">{t("playground.sessions")}</span>
             </div>
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={handleCreateSession}
-              title={t("playground.newSession")}
-              className="size-7 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-950/60 dark:text-blue-400"
-            >
-              <Plus className="size-3.5" />
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={handleCreateSession}
+                title={t("playground.newSession")}
+                className="size-7 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-950/60 dark:text-blue-400"
+              >
+                <Plus className="size-3.5" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => setMobileSessionsOpen(false)}
+                title="关闭"
+                className="flex lg:hidden size-7 rounded-xl text-slate-400 hover:text-slate-600"
+              >
+                <X className="size-3.5" />
+              </Button>
+            </div>
           </div>
 
           {/* Search bar */}
@@ -918,6 +955,7 @@ export function PlaygroundPage() {
                   onClick={() => {
                     setActiveSessionId(session.id);
                     setSelectedModel(session.model || selectedModel);
+                    setMobileSessionsOpen(false);
                   }}
                   className={cn(
                     "group relative flex cursor-pointer items-center justify-between rounded-xl px-3 py-2 text-xs transition-all",
@@ -990,21 +1028,39 @@ export function PlaygroundPage() {
             会话保存在本地缓存
           </div>
         </div>
-      )}
+      </div>
 
       {/* ---------------------------------------------------------------- Column 2: Active Chat & Control Area */}
       <div className="flex flex-1 flex-col overflow-hidden bg-white/40 dark:bg-slate-900/40">
         {/* Playground Top Bar */}
         <div className="flex items-center justify-between border-b border-slate-200/70 bg-white/80 px-4 py-2.5 backdrop-blur-md dark:border-slate-800/70 dark:bg-slate-900/80">
           <div className="flex items-center gap-2 min-w-0">
-            <button
-              type="button"
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              className="hidden lg:flex size-7 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800"
-              title="切换会话栏"
-            >
-              <Terminal className="size-3.5" />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => setMobileSessionsOpen(true)}
+                  className="flex lg:hidden size-7 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800"
+                  aria-label="打开会话列表"
+                >
+                  <PanelLeftOpen className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">会话列表</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                  className="hidden lg:flex size-7 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800"
+                  aria-label={sidebarCollapsed ? "展开会话栏" : "收起会话栏"}
+                >
+                  {sidebarCollapsed ? <PanelLeftOpen className="size-3.5" /> : <PanelLeftClose className="size-3.5" />}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{sidebarCollapsed ? "展开会话栏" : "收起会话栏"}</TooltipContent>
+            </Tooltip>
 
             {/* Model Selector Dropdown */}
             <DropdownMenu>
@@ -1063,10 +1119,12 @@ export function PlaygroundPage() {
             </DropdownMenu>
 
             {/* Status Indicator */}
-            <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-slate-400 pl-1 font-mono">
-              <span className="size-2 rounded-full bg-emerald-500" />
-              <span>/v1/chat/completions</span>
-            </div>
+            {!rightPanelTab && (
+              <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-slate-400 pl-1 font-mono">
+                <span className="size-2 rounded-full bg-emerald-500" />
+                <span>/v1/chat/completions</span>
+              </div>
+            )}
           </div>
 
           {/* Action Tools (System Prompt, Parameters, Inspector, Clear) */}
@@ -1082,27 +1140,23 @@ export function PlaygroundPage() {
               <span className="hidden sm:inline">System Prompt</span>
             </Button>
 
-            <Button
-              variant={rightPanelTab === "params" ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setRightPanelTab(rightPanelTab === "params" ? null : "params")}
-              className="h-8 gap-1 rounded-xl text-xs"
-              title={t("playground.params")}
-            >
-              <Cpu className="size-3.5 text-blue-500" />
-              <span className="hidden md:inline">{t("playground.params")}</span>
-            </Button>
-
-            <Button
-              variant={rightPanelTab === "inspector" ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setRightPanelTab(rightPanelTab === "inspector" ? null : "inspector")}
-              className="h-8 gap-1 rounded-xl text-xs"
-              title={t("playground.inspector")}
-            >
-              <Code2 className="size-3.5 text-purple-500" />
-              <span className="hidden md:inline">{t("playground.inspector")}</span>
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={rightPanelTab ? "secondary" : "ghost"}
+                  size="icon"
+                  onClick={() => {
+                    if (!rightPanelTab) setMobileSessionsOpen(false);
+                    setRightPanelTab(rightPanelTab ? null : lastPanelTab);
+                  }}
+                  className="size-8 rounded-xl"
+                  aria-label={t("playground.panel")}
+                >
+                  <Settings2 className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t("playground.panel")}</TooltipContent>
+            </Tooltip>
 
             <Button
               variant="ghost"
@@ -1166,7 +1220,7 @@ export function PlaygroundPage() {
                       key={item.label}
                       type="button"
                       onClick={() => handleSend(item.prompt)}
-                      className="group flex flex-col rounded-2xl border border-slate-200/80 bg-white/80 p-3 text-xs shadow-xs transition hover:border-blue-400 hover:bg-blue-50/40 hover:shadow-sm dark:border-slate-800 dark:bg-slate-850 dark:hover:bg-slate-800"
+                      className="group flex flex-col rounded-2xl border border-slate-200/80 bg-white/80 p-3 text-xs shadow-xs transition hover:border-blue-400 hover:bg-blue-50/40 hover:shadow-sm dark:border-slate-800 dark:bg-slate-900/80 dark:hover:bg-slate-800"
                     >
                       <div className="flex items-center justify-between mb-1">
                         <span className="font-semibold text-slate-800 group-hover:text-blue-600 dark:text-slate-200 dark:group-hover:text-blue-400">
@@ -1568,16 +1622,29 @@ export function PlaygroundPage() {
 
       {/* ---------------------------------------------------------------- Column 3: Parameters & JSON Inspector Pane */}
       {rightPanelTab && (
-        <div className="w-80 md:w-96 flex flex-col border-l border-slate-200/70 bg-white/95 dark:border-slate-800/70 dark:bg-slate-900/95 backdrop-blur-xl animate-in slide-in-from-right-3 duration-200">
+        <div
+          className="fixed inset-0 z-40 animate-in fade-in duration-200 bg-slate-950/40 backdrop-blur-sm md:hidden"
+          onClick={() => setRightPanelTab(null)}
+          aria-hidden="true"
+        />
+      )}
+      <div
+        className={cn(
+          "fixed inset-y-0 right-0 z-50 w-80 overflow-hidden transition-transform duration-200 ease-in-out",
+          "md:static md:z-auto md:shrink-0 md:translate-x-0 md:transition-[width]",
+          rightPanelTab ? "translate-x-0 md:w-96" : "translate-x-full md:w-0",
+        )}
+      >
+        <div className="flex h-full w-80 md:w-96 flex-col border-l border-slate-200/70 bg-white/95 dark:border-slate-800/70 dark:bg-slate-900/95 backdrop-blur-xl">
           {/* Panel Header Tabs */}
-          <div className="flex items-center justify-between border-b border-slate-200/70 px-3 py-2 dark:border-slate-800/70">
+          <div className="flex h-[53px] items-center justify-between border-b border-slate-200/70 px-3 dark:border-slate-800/70">
             <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl">
               <button
                 type="button"
                 onClick={() => setRightPanelTab("params")}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition",
-                  rightPanelTab === "params"
+                  panelTab === "params"
                     ? "bg-white text-blue-600 shadow-xs dark:bg-slate-900 dark:text-blue-400"
                     : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200",
                 )}
@@ -1591,7 +1658,7 @@ export function PlaygroundPage() {
                 onClick={() => setRightPanelTab("inspector")}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition",
-                  rightPanelTab === "inspector"
+                  panelTab === "inspector"
                     ? "bg-white text-purple-600 shadow-xs dark:bg-slate-900 dark:text-purple-400"
                     : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200",
                 )}
@@ -1608,12 +1675,12 @@ export function PlaygroundPage() {
               onClick={() => setRightPanelTab(null)}
               title={t("common.close")}
             >
-              <PanelRight className="size-3.5" />
+              <X className="size-3.5" />
             </Button>
           </div>
 
           {/* Tab Content: Parameters */}
-          {rightPanelTab === "params" && (
+          {panelTab === "params" && (
             <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs select-none">
               {/* Target Model Input */}
               <div className="space-y-1.5">
@@ -1708,7 +1775,7 @@ export function PlaygroundPage() {
           )}
 
           {/* Tab Content: JSON Inspector */}
-          {rightPanelTab === "inspector" && (
+          {panelTab === "inspector" && (
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {inspectedMessage && (inspectedMessage.rawRequest || inspectedMessage.rawResponse) ? (
                 <>
@@ -1820,7 +1887,7 @@ export function PlaygroundPage() {
             </div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
