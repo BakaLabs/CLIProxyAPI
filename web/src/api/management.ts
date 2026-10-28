@@ -334,7 +334,20 @@ export const plugins = {
     return data as PluginStoreResult;
   },
   async install(storeId: string, opts?: { version?: string; source?: string }): Promise<void> {
-    await client.post(`/plugins/store/${storeId}/install`, null, { params: opts });
+    let id = (storeId || "").trim();
+    const params: { version?: string; source?: string } = { ...opts };
+    const lastSlash = id.lastIndexOf("/");
+    if (lastSlash >= 0) {
+      const sourcePart = id.slice(0, lastSlash).trim();
+      const idPart = id.slice(lastSlash + 1).trim();
+      if (sourcePart && !params.source) {
+        params.source = sourcePart;
+      }
+      if (idPart) {
+        id = idPart;
+      }
+    }
+    await client.post(`/plugins/store/${encodeURIComponent(id)}/install`, null, { params });
   },
   async remove(id: string): Promise<void> {
     await client.delete(`/plugins/${id}`);

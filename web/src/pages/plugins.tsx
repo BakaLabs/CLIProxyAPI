@@ -604,9 +604,9 @@ export function PluginsPage() {
                   item={item}
                   onInstall={(version, source) =>
                     installMutation.mutate({
-                      storeId: item.store_id || item.id || "",
+                      storeId: item.id || item.store_id || "",
                       version,
-                      source,
+                      source: source || item.source_id,
                     })
                   }
                   installing={installMutation.isPending}
